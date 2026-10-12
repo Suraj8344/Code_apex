@@ -1,0 +1,10 @@
+.env
+.env.*
+.git
+.venv
+venv
+__pycache__
+artifacts
+auth_state.json
+playwright-report
+test-results

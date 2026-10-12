@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: qarena
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /
+    envVars:
+      - key: QA_ARTIFACTS_DIR
+        value: /app/artifacts
+      - key: QARENA_LLM_MODEL
+        value: groq/openai/gpt-oss-120b
+      - key: GROQ_API_KEY
+        sync: false

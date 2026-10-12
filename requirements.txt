@@ -13,3 +13,4 @@ pytest>=8                 # exported suite runner (self-verified green)
 # LLM is optional: QArena runs fully key-free (heuristic mode). Set an API key
 # and the 4-call hybrid planner/judge/reporter upgrade kicks in automatically.
 python-dotenv>=1
+litellm>=1.0

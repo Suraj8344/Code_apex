@@ -58,7 +58,7 @@ NAV_BLOCKED_PATTERNS = NAV_BLOCKED_EXPLORER
 SEARCH_PROBE = "neon"        # safe GET probe used to discover the search route
 
 # ---- LLM (LiteLLM; whole pipeline also runs key-free via heuristics) ----
-LLM_MODEL_ENV_DEFAULT = "gemini/gemini-2.0-flash"
+LLM_MODEL_ENV_DEFAULT = "groq/openai/gpt-oss-120b"
 LLM_MAX_TOKENS = 2200
 LLM_TIMEOUT_S = 45
 
