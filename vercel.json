@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python",
+      "config": {
+        "includeFiles": "{app,core,frontend,jinja_templates,scorer,assets,lib}/**"
+      }
+    }
+  ],
+  "routes": [{ "src": "/(.*)", "dest": "api/index.py" }]
+}
