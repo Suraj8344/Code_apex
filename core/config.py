@@ -3,16 +3,19 @@ Stage 2 [Python Config] — Run limits, 6-signal weights, decision thresholds.
 Everything tunable in one place. Architecture section 2/5b values.
 """
 from pathlib import Path
+import os as _os
 
 ROOT = Path(__file__).resolve().parent.parent
-ARTIFACTS = ROOT / "artifacts"
+ARTIFACTS = Path(_os.environ.get(
+    "QA_ARTIFACTS_DIR",
+    "/tmp/qarena-artifacts" if _os.environ.get("VERCEL") else ROOT / "artifacts",
+))
 AUTH_STATE = ROOT / "auth_state.json"
 AXE_JS = ROOT / "assets" / "axe.min.js"
 JINJA_DIR = ROOT / "jinja_templates"
 # Ground-truth for the benchmark scorer (Stage 8): point QA_TRUTH_JSON at any
 # planted-bug catalog ({url, bugs:[{id,title,signals,hints}]}) for the target
 # under test. No file => benchmark stage reports gracefully as unavailable.
-import os as _os
 SAMPLE_APP_BUGS = Path(_os.environ.get("QA_TRUTH_JSON",
                                        ROOT / "sample_app" / "bugs.json"))
 
