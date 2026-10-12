@@ -1,0 +1,15 @@
+# QArena — Autonomous AI QA Engineer (CODE APEX 3.0 · IM-02)
+# stack: mainstream Python only — pip install -r + one `playwright install chromium`
+fastapi>=0.115            # web shell (Stage UI): pages, SSE, evidence downloads
+uvicorn[standard]>=0.30   # ASGI server
+jinja2>=3.1               # server-rendered templates (run form, run page, reports)
+itsdangerous>=2.2         # fastapi/starlette session cookies
+python-multipart>=0.0.9   # form posts
+httpx>=0.27               # target probe / seed / health checks
+playwright>=1.44          # browser engine for explorer/tester/verifier (pass^3 gate)
+pyvis>=0.3                # interactive territory-map renderer (AppMap)
+pydantic>=2               # Stage-4/5 contracts (TestCase, PossibleBug, RunResult…)
+pytest>=8                 # exported suite runner (self-verified green)
+# LLM is optional: QArena runs fully key-free (heuristic mode). Set an API key
+# and the 4-call hybrid planner/judge/reporter upgrade kicks in automatically.
+python-dotenv>=1

@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Expedition {{ run_id }} — QArena{% endblock %}
+{% block topnav %}
+  <a class="pill" href="/expedition">+ new expedition</a>
+  <span class="pill mono" id="status-pill">RUNNING</span>
+  <span class="pill mono ghost" title="LLM tokens used this run (0 = fully key-free / deterministic mode)">◉ <span id="tokens">0</span> tok</span>
+  <span class="pill mono ghost">⏱ <span id="clock">0:00</span></span>
+{% endblock %}
+{% block content %}
+<div class="run-head">
+  <div>
+    <p class="kicker">EXPEDITION #{{ run_id }}</p>
+    <h1 class="run-target mono">{{ target }}</h1>
+  </div>
+  <a class="btn-ink" id="zip-btn" href="/api/runs/{{ run_id }}/zip" hidden>⬇ Download full evidence pack</a>
+</div>
+
+<ol class="trail-stepper" id="stepper" aria-label="pipeline stages">
+  <li data-stage="2"><b>2</b> Set up</li>
+  <li data-stage="3"><b>3</b> Explore site</li>
+  <li data-stage="4"><b>4</b> Plan tests</li>
+  <li data-stage="5"><b>5</b> Run &amp; judge</li>
+  <li data-stage="6"><b>6</b> Double-check 3×</li>
+  <li data-stage="7"><b>7</b> Report &amp; export</li>
+  <li data-stage="8"><b>8</b> Benchmark</li>
+</ol>
+
+<section class="run-grid">
+  <div class="card log-card">
+    <h2 class="card-title">Field log <span class="stamp">LIVE</span></h2>
+    <p class="micro">A plain-English story of the hunt, as it happens — what pages were
+    found, which test journeys were tried, and which possible bugs survived
+    double-checking.</p>
+    <ul id="log" class="ledger mono" aria-live="polite"></ul>
+  </div>
+  <div class="side-col">
+    <div class="stat-tiles">
+      <div class="tile"><span class="num" id="st-states">0</span><span class="lbl">pages found</span></div>
+      <div class="tile"><span class="num" id="st-tests">0</span><span class="lbl">tests planned</span></div>
+      <div class="tile"><span class="num" id="st-steps">0</span><span class="lbl">journey steps</span></div>
+      <div class="tile amber"><span class="num" id="st-suspects">0</span><span class="lbl">possible bugs</span></div>
+      <div class="tile brick"><span class="num" id="st-confirmed">0</span><span class="lbl">proven bugs</span></div>
+      <div class="tile"><span class="num" id="st-flaky">0</span><span class="lbl">unproven (dropped)</span></div>
+    </div>
+    <div class="card map-card" id="map-card" hidden>
+      <h2 class="card-title">Territory map</h2>
+      <p class="micro">Every page QArena found on the target, as an interactive graph.</p>
+      <iframe id="map-frame" title="AppMap"></iframe>
+    </div>
+  </div>
+</section>
+
+<section id="trays">
+  <div class="tray amber-tray" id="suspect-tray" hidden>
+    <h3>🔍 Possible bugs — now being double-checked</h3>
+    <p class="explain">These are raw sightings from the judge. <strong>Nothing here is a
+    confirmed bug yet.</strong> Each candidate is replayed 3 times in fresh browsers
+    (stage 6); only what reproduces at least 2 out of 3 is kept. This list is
+    deliberately bigger than the final report — most of the value is what we
+    <em>refuse</em> to file.</p>
+    <ul id="suspect-list"></ul>
+  </div>
+  <div class="tray" id="flaky-tray" hidden>
+    <h3>🌫 Seen but unproven — dropped, never reported</h3>
+    <p class="explain">We caught something odd, but it did not come back on at least
+    2 of 3 clean-browser replays. Rather than waste your attention, we record it
+    here and move on.</p>
+    <ul id="flaky-list"></ul>
+  </div>
+</section>
+
+<section id="findings" hidden>
+  <div class="findings-head">
+    <h2 class="big-title">Specimen board</h2>
+    <p class="sub">Proven bugs, pinned like specimens. Each one reproduced in at least
+    2 of 3 fresh clean-browser runs — the verification loop is pure code, no AI.</p>
+  </div>
+
+  <div class="card error-card" id="error-card" hidden>
+    <h2 class="card-title">🛑 This expedition stopped early</h2>
+    <p id="error-msg" class="explain"></p>
+    <p class="micro">Typical causes: the target URL is down, blocked by a firewall, or
+    took too long to answer. Fix the target, press “+ new expedition” and run again —
+    partial diagnostics stay available below.</p>
+  </div>
+
+  <div class="card bench-card" id="bench-card" hidden>
+    <h2 class="card-title">Benchmark vs planted-bug ground truth <span class="stamp">STAGE 8</span></h2>
+    <p class="micro">Only shown when the run dir ships a ground-truth bug list
+    (<code>QA_TRUTH_JSON</code>). QArena graded its own reports against the bugs we
+    hid — incumbents never publish this because it keeps claims honest.</p>
+    <div class="bench-grid mono" id="bench-grid"></div>
+    <p class="micro" id="bench-missed"></p>
+  </div>
+
+  <div class="cov-row mono" id="cov-row"></div>
+
+  <div id="specimens" class="specimens"></div>
+
+  <div class="card tests-card" id="tests-card" hidden>
+    <h2 class="card-title">Your regression suite — keep these tests <span class="stamp">STAGE 7b</span></h2>
+    <p class="explain">Journeys that <em>passed</em> (the app behaved) were converted into
+    ordinary <strong>pytest + Playwright</strong> files. QArena already executed each one
+    and dropped any that didn't pass — so everything below is green today, and turns
+    red the day a change breaks your app.</p>
+    <p class="explain"><strong>Use them anywhere, no QArena needed:</strong></p>
+    <pre class="code-block mono">pip install pytest playwright
+playwright install chromium
+pytest exported_tests/     # inside the downloaded evidence pack</pre>
+    <ul id="tests-list" class="tests-list mono"></ul>
+  </div>
+
+  <div class="tray" id="rejected-tray" hidden>
+    <h3>🛡 Grounding guardrail — ideas the agent refused to try</h3>
+    <p class="explain">The planner only attempts actions it actually found on your site.
+    When it invents a step that can't be proven to exist (a button that isn't there, a
+    page that doesn't exist), the step is rejected and logged here. This keeps the
+    hunt honest: what ran is real; what was imagined is visible.</p>
+    <ul id="rejected-list"></ul>
+  </div>
+</section>
+
+<script id="seed" type="application/json">{{ history | safe }}</script>
+<script src="/static/app.js"></script>
+{% endblock %}

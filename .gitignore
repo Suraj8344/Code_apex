@@ -1,0 +1,48 @@
+﻿# Python environments and caches
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+secrets/
+**/secrets/
+**/*credentials*
+**/*credential*
+**/*auth_state*.json
+**/*storage_state*.json
+**/*cookies*.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Browser testing outputs
+playwright-report/
+test-results/
+**/trace.zip
+**/*.webm
+
+# Node.js dependencies and builds
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Generated QArena runtime artifacts
+artifacts/
+

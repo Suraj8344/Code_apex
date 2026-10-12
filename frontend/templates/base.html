@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}QArena{% endblock %}</title>
+<link rel="stylesheet" href="/static/styles.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cellipse cx='16' cy='18' rx='8' ry='10' fill='%232f5d3f'/%3E%3Ccircle cx='16' cy='8' r='4' fill='%232f5d3f'/%3E%3C/svg%3E">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">
+    <svg class="beetle" viewBox="0 0 40 40" aria-hidden="true">
+      <ellipse cx="20" cy="23" rx="9" ry="11"/>
+      <circle cx="20" cy="9" r="4.5"/>
+      <line x1="20" y1="13" x2="20" y2="33" class="split"/>
+      <path d="M11 18 L3 14 M11 24 L3 24 M11 30 L3 34 M29 18 L37 14 M29 24 L37 24 M29 30 L37 34" class="legs"/>
+      <path d="M17 5 L13 1 M23 5 L27 1" class="legs"/>
+    </svg>
+    <span class="wordmark">QArena</span>
+    <span class="tagline">autonomous bug hunts, replay-verified</span>
+  </a>
+  <nav class="topnav">
+    {% block topnav %}{% endblock %}
+  </nav>
+</header>
+<main>
+  {% block content %}{% endblock %}
+</main>
+<footer class="foot">
+  <span>QArena · IM-02 Autonomous AI QA Engineer · CODE APEX 3.0 (iMocha track)</span>
+  <span class="mono">90% deterministic code · 4 sanctioned LLM calls · zero hallucinated reports</span>
+</footer>
+</body>
+</html>

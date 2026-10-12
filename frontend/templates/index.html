@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}QArena — begin an expedition{% endblock %}
+{% block content %}
+<section class="hero">
+  <p class="kicker">FIELD UNIT · WEB QA</p>
+  <h1>Send an autonomous agent to hunt bugs<br>in <em>any</em> web application.</h1>
+  <p class="sub">QArena explores your app like a suspicious human tester, plans happy-path
+  and adversarial journeys, executes them in a real Chromium browser, and files only
+  <strong>replay-verified</strong> bug reports — plus a regression suite that runs green on its own.</p>
+</section>
+
+<section class="setup-grid">
+  <form id="expedition" class="card form-card">
+    <h2 class="card-title">⛺ Expedition setup <span class="stamp">STAGE 1</span></h2>
+
+    <label for="url">Target web app URL</label>
+    <input id="url" name="url" type="url" required value="{{ default_url }}"
+           placeholder="https://your-app.com">
+    <p class="micro">Any publicly reachable app — or one hosted on this machine.</p>
+
+    <label for="desc">Short description — what should the app do?</label>
+    <textarea id="desc" name="description" rows="6" required
+      placeholder="e.g. MyShop is an online store. Visitors browse products, add them to a cart, apply promo codes and check out with name, email and address. Invalid input must be rejected with a clear message; prices and totals must always be correct and can never go negative.">{{ default_desc }}</textarea>
+    <p class="micro">Write the business rules you expect to hold — QArena checks the
+    live app against exactly this text (the “intent check”), so be specific.</p>
+
+    <div class="two-col">
+      <div>
+        <label for="email">Test login email <span class="opt">optional</span></label>
+        <input id="email" name="email" type="text" autocomplete="off"
+               placeholder="example@gmail.com — optional">
+      </div>
+      <div>
+        <label for="password">Test password <span class="opt">optional</span></label>
+        <input id="password" name="password" type="password" autocomplete="off"
+               placeholder="optional — used once, never stored">
+      </div>
+    </div>
+    <p class="micro">Only needed if the app requires sign-in. Used for one login
+    inside the sandboxed browser, then discarded.</p>
+
+    <details class="advanced">
+      <summary>White-box repo mode <span class="opt">optional — code-diff prioritization &amp; root-cause locator</span></summary>
+      <div class="two-col">
+        <div><label>Local app folder</label><input id="wb_folder" type="text" placeholder="/path/to/repo"></div>
+        <div><label>Start command</label><input id="wb_cmd" type="text" placeholder="python3 server.py"></div>
+      </div>
+      <label>Port</label><input id="wb_port" type="number" placeholder="8900" style="max-width:120px">
+    </details>
+
+    <button type="submit" class="btn-launch" id="launch">Start the expedition →</button>
+    <p id="form-error" class="error-text" hidden></p>
+  </form>
+
+  <aside class="card facts-card">
+    <h2 class="card-title">🔍 What comes back</h2>
+    <ul class="facts">
+      <li><strong>Territory map</strong> — every page/route discovered, rendered live</li>
+      <li><strong>Specimen cards</strong> — bug reports with numbered repro steps,
+          expected vs actual, screenshots &amp; full Playwright traces</li>
+      <li><strong>pass³ verification</strong> — every suspect replayed 3× in clean browsers;
+          2/3 reproduction or it never reaches you</li>
+      <li><strong>Regression suite</strong> — passing journeys exported as plain
+          pytest-playwright files, self-run before delivery</li>
+      <li><strong>Benchmark</strong> — precision / recall / F1 against planted bugs</li>
+    </ul>
+    <div class="trail">
+      <span>2 sandbox</span><span>3 explore</span><span>4 plan</span><span>5 test×judge</span>
+      <span>6 verify</span><span>7 report+export</span><span>8 benchmark</span>
+    </div>
+    <p class="micro mono">LLM: limited to 4 sanctioned calls. No API key? The deterministic
+    engines run the entire pipeline anyway.</p>
+  </aside>
+</section>
+
+<script>
+document.getElementById("expedition").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById("launch");
+  const err = document.getElementById("form-error");
+  err.hidden = true;
+  btn.disabled = true; btn.textContent = "Assembling field kit…";
+  const wb = {};
+  const f = document.getElementById("wb_folder").value.trim();
+  if (f) { wb.folder = f;
+           wb.command = document.getElementById("wb_cmd").value.trim() || "python3 server.py";
+           wb.port = document.getElementById("wb_port").value || "8900"; }
+  const payload = {
+    url: document.getElementById("url").value,
+    description: document.getElementById("desc").value,
+    email: document.getElementById("email").value,
+    password: document.getElementById("password").value,
+    whitebox: Object.keys(wb).length ? wb : null,
+  };
+  try {
+    const r = await fetch("/api/runs", {method: "POST",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    const data = await r.json();
+    location.href = data.watch;
+  } catch (ex) {
+    err.hidden = false;
+    err.textContent = "Could not start: " + ex.message;
+    btn.disabled = false; btn.textContent = "Start the expedition →";
+  }
+});
+</script>
+{% endblock %}

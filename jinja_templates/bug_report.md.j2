@@ -1,0 +1,25 @@
+# {{ bug.bug_id }} — {{ bug.title }}
+
+**Severity:** {{ bug.severity }}   **Status:** Confirmed (reproduced {{ bug.reproduced_count }} in clean-browser replay)
+**Journey:** `{{ bug.journey }}`   **Route:** `{{ bug.route }}`   **Signals:** {{ bug.signals | map('string') | join(', ') }}
+
+## Steps to reproduce
+{% for step in bug.steps_to_reproduce -%}
+{{ step }}
+{% endfor %}
+
+## Expected behaviour
+{{ bug.expected_behavior }}
+
+## Actual behaviour
+{{ bug.actual_behavior }}
+
+## Evidence
+{% for s in bug.evidence.get('signals', []) -%}
+- {{ s }}
+{% endfor %}
+- Screenshot: `{{ bug.evidence.get('screenshot', '') }}`
+- Full Playwright trace: `{{ bug.evidence.get('trace', '') }}`
+
+---
+*Filed by QArena — every fact above is replay-verified in a clean browser (zero AI in the verification loop).*

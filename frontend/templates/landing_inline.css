@@ -1,0 +1,120 @@
+/* ---------- landing v2 ---------- */
+.nav-link{font-family:var(--mono);font-size:12px;color:var(--ink-soft);
+  text-decoration:none;padding:8px 10px}
+.nav-link:hover{color:var(--forest)}
+.topnav{gap:6px}
+
+.hero2{display:grid;grid-template-columns:1.05fr .95fr;gap:38px;align-items:center;
+  margin:58px 0 48px}
+.hero2-copy h1{font-size:54px;line-height:1.06;margin:0 0 18px;letter-spacing:-.02em}
+.hero2-copy h1 em{font-style:normal;color:var(--forest);position:relative}
+.hero2-copy h1 em::after{content:"";position:absolute;left:0;right:0;bottom:4px;
+  height:.28em;background:var(--amber);opacity:.35;z-index:-1}
+.hero2-copy .sub{font-size:17.5px;color:var(--ink-soft);line-height:1.65;max-width:520px}
+
+/* live demo card */
+.demo{background:#1d1f1a;border:2px solid var(--ink);border-radius:12px;
+  box-shadow:6px 7px 0 rgba(35,37,31,.22);padding:14px 16px 16px;position:relative;
+  min-height:340px;transform:rotate(.7deg)}
+.demo-top{display:flex;align-items:center;gap:7px;margin-bottom:10px}
+.dot{width:10px;height:10px;border-radius:50%}
+.dot.r{background:#e6634f}.dot.a{background:#e5b04b}.dot.g{background:#7dbf6a}
+.demo-title{margin-left:8px;color:#9aa091;font-size:10.5px;letter-spacing:.1em}
+.demo-log{list-style:none;margin:0;padding:0 0 4px;color:#cfd4c4;font-size:12px;
+  line-height:1.75;max-height:250px;overflow:hidden}
+.demo-log li{white-space:pre-wrap;padding-left:2px;border-left:2px solid transparent;
+  animation:demoIn .25s ease}
+.demo-log li.cmd{color:#fff}
+.demo-log li.dim{color:#7d836f}
+.demo-log li.ok{color:#a4d68e}
+.demo-log li.bug{color:#f0b3a6;border-left-color:#e6634f;padding-left:8px;font-weight:700}
+@keyframes demoIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+.demo-spec{position:absolute;right:14px;bottom:14px;width:230px;background:var(--card);
+  border:1.5px solid var(--ink);border-radius:8px;padding:10px 12px;
+  box-shadow:var(--shadow);animation:pinIn .35s ease;transform:rotate(-1.5deg)}
+@keyframes pinIn{from{opacity:0;transform:translateY(14px) rotate(3deg)}
+  to{opacity:1;transform:rotate(-1.5deg)}}
+.demo-spec .pin{position:absolute;top:-8px;left:50%;width:13px;height:13px;border-radius:50%;
+  background:var(--brick);box-shadow:0 1px 2px rgba(0,0,0,.4);transform:translateX(-50%)}
+.ds-id{margin:0;font-size:10px;color:var(--amber);letter-spacing:.12em}
+.ds-title{margin:4px 0;font-size:13px;font-weight:800;line-height:1.3}
+.ds-title .dim{font-weight:400;font-size:10.5px;color:var(--muted)}
+.ds-proof{margin:0;font-size:9.5px;color:var(--forest)}
+
+/* stats band */
+.stats-band{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0 46px}
+.stat{border-top:3px solid var(--ink);padding:14px 6px 4px}
+.stat b{display:block;font-size:34px;font-weight:800;letter-spacing:-.01em}
+.stat:nth-child(1) b{color:var(--forest)}
+.stat:nth-child(2) b{color:var(--ink)}
+.stat:nth-child(3) b{color:var(--amber)}
+.stat:nth-child(4) b{color:var(--brick)}
+.stat span{display:block;font-size:12.5px;color:var(--ink-soft);line-height:1.45;margin-top:4px}
+
+/* section titles */
+.sec-title{font-size:30px;margin:0 0 20px;letter-spacing:-.01em}
+
+/* how-it-works */
+.how-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:46px}
+.how-card{background:var(--card);border:1.5px solid var(--ink);border-radius:10px;
+  padding:18px 18px 16px;box-shadow:var(--shadow);
+  transition:transform .12s ease, box-shadow .12s ease}
+.how-card:hover{transform:translateY(-3px) rotate(-.3deg);box-shadow:6px 8px 0 rgba(35,37,31,.2)}
+.how-card h3{margin:10px 0 6px;font-size:16.5px}
+.how-card p{margin:0;font-size:13.5px;color:var(--ink-soft);line-height:1.55}
+.how-icon{width:52px;height:52px}
+.how-icon.small{width:44px;height:44px}
+.how-icon svg{width:100%;height:100%}
+.how-icon .ring{fill:none;stroke:var(--forest);stroke-width:3}
+.how-icon .ring2{fill:none;stroke:var(--amber);stroke-width:2.5}
+.how-icon .core{fill:var(--forest)}
+.how-icon .core.warn{fill:var(--brick)}
+.how-icon .core.ok{fill:var(--forest)}
+.how-icon .core.dotr{fill:var(--amber)}
+.how-icon .tick{stroke:var(--ink-soft);stroke-width:3;stroke-linecap:round}
+.how-icon .beam{stroke:var(--amber);stroke-width:3;stroke-linecap:round}
+.how-icon .beam.hot{stroke:var(--brick);stroke-width:3.5}
+.how-icon .edge{stroke:var(--ink-soft);stroke-width:2.5;stroke-linecap:round}
+.how-icon .bar{stroke:var(--forest);stroke-width:4.5;stroke-linecap:round}
+.how-icon .node{fill:none;stroke:var(--forest);stroke-width:3}
+.how-icon .box{fill:rgba(47,93,63,.08);stroke:var(--forest);stroke-width:3}
+.how-icon .flask{fill:rgba(201,138,18,.12);stroke:var(--forest);stroke-width:3;stroke-linejoin:round}
+.how-icon .cap{stroke:var(--ink);stroke-width:4}
+.how-icon .line{stroke:var(--ink-soft);stroke-width:2.5;stroke-linecap:round}
+
+/* proof shot */
+.l-shot img{width:100%;border:1.5px solid var(--ink);border-radius:6px;
+  box-shadow:var(--shadow);transition:transform .15s ease}
+.l-shot img:hover{transform:scale(1.008)}
+
+/* get grid (re-using .l-grid styles from styles.css) */
+.get-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:40px}
+.l-card{transition:transform .12s ease}
+.l-card:hover{transform:translateY(-3px)}
+
+/* versus */
+.versus{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:10px 0 40px}
+.vs-col{border:1.5px solid var(--ink);border-radius:10px;padding:18px 22px;
+  box-shadow:var(--shadow)}
+.vs-col h3{margin:0 0 10px;font-size:17px}
+.vs-col ul{margin:0;padding-left:18px;display:grid;gap:8px;font-size:14px}
+.vs-them{background:#fdeceb;color:var(--ink-soft)}
+.vs-them li::marker{content:"✗  ";color:var(--brick)}
+.vs-us{background:#eef6ef}
+.vs-us li::marker{content:"✓  ";color:var(--forest)}
+
+/* reveal on scroll */
+.reveal{opacity:0;transform:translateY(16px);transition:opacity .5s ease,transform .5s ease}
+.reveal.show{opacity:1;transform:none}
+
+@media (max-width:920px){
+  .hero2{grid-template-columns:1fr;margin:34px 0}
+  .hero2-copy h1{font-size:38px}
+  .demo{transform:none}
+  .stats-band{grid-template-columns:repeat(2,1fr)}
+  .how-grid{grid-template-columns:1fr 1fr}
+  .get-grid{grid-template-columns:1fr}
+  .versus{grid-template-columns:1fr}
+  .nav-link{display:none}
+}
+@media (max-width:520px){ .how-grid{grid-template-columns:1fr} }

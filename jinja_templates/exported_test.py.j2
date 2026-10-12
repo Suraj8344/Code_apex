@@ -1,0 +1,58 @@
+"""
+{{ tc.test_id }} — {{ tc.title }}
+Journey type: {{ tc.journey_type }} | exported by QArena (Stage 7b, zero AI).
+Runs standalone:  pytest {{ 'this file' }} --base-url <app-url>
+"""
+import re
+
+import pytest
+from playwright.sync_api import Page, expect
+
+BASE = "{{ target_url }}"
+
+
+@pytest.fixture(scope="function", autouse=True)
+def reset_world(page: Page):
+    """If the target exposes QArena's /__seed__ hook, start from a clean world."""
+    try:
+        page.request.get(BASE + "/__seed__", timeout=2500)
+    except Exception:
+        pass
+    yield
+
+
+def test_{{ slug }}(page: Page, base_url: str | None = None):
+    base = base_url or BASE
+{%- for st in tc.steps %}
+{%- if st.action == "goto" %}
+    page.goto(base + "{{ st.target }}")
+{%- elif st.action == "click" %}
+    page.get_by_role("{{ st.role }}", name="{{ st.name }}").first.click()
+{%- elif st.action == "dblclick" %}
+    page.get_by_role("{{ st.role }}", name="{{ st.name }}").first.dblclick()
+{%- elif st.action == "fill" %}
+    page.get_by_role("{{ st.role }}", name="{{ st.name }}").fill("{{ st.value }}")
+{%- elif st.action == "press" %}
+    page.get_by_role("{{ st.role }}", name="{{ st.name }}").press("{{ st.target or 'Enter' }}")
+{%- elif st.action == "select" %}
+    page.get_by_role("{{ st.role }}", name="{{ st.name }}").select_option("{{ st.value }}")
+{%- elif st.action == "wait" %}
+    page.wait_for_timeout({{ st.target or 600 }})
+{%- elif st.action == "check_text" %}
+    expect(page.locator("body")).to_contain_text("{{ st.target }}")
+{%- elif st.action == "assert_badge" %}
+    expect(page.locator("#cart-badge")).to_have_text("{{ st.target }}")
+{%- endif %}
+{%- endfor %}
+{%- if tc.expected.success_url_contains %}
+    page.wait_for_url(re.compile(r".*{{ tc.expected.success_url_contains }}.*"), timeout=5000)
+{%- endif %}
+{%- for t in tc.expected.text_required %}
+    expect(page.locator("body")).to_contain_text("{{ t }}")
+{%- endfor %}
+{%- for t in tc.expected.text_forbidden %}
+    expect(page.locator("body")).not_to_contain_text("{{ t }}")
+{%- endfor %}
+{%- if tc.expected.badge_equals is not none %}
+    expect(page.locator("#cart-badge")).to_have_text("{{ tc.expected.badge_equals }}")
+{%- endif %}
