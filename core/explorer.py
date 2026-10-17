@@ -228,7 +228,8 @@ class Explorer:
 
     # ------------------------------------------------------------- persist
     def _persist(self) -> None:
-        (self.run_dir / "AppMap.json").write_text(self.appmap.model_dump_json(indent=2))
+        (self.run_dir / "AppMap.json").write_text(
+            self.appmap.model_dump_json(indent=2), encoding="utf-8")
         db = sqlite3.connect(self.run_dir / "codemap.sqlite")
         db.executescript(
             "CREATE TABLE IF NOT EXISTS states(state_id TEXT PRIMARY KEY, data TEXT);"

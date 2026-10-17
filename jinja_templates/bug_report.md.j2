@@ -21,5 +21,18 @@
 - Screenshot: `{{ bug.evidence.get('screenshot', '') }}`
 - Full Playwright trace: `{{ bug.evidence.get('trace', '') }}`
 
+## Likely cause and suggested remediation
+{{ recommendations.likely_cause }}
+{% for step in recommendations.recommended_fix %}
+- {{ step }}
+{% endfor %}
+
+{{ recommendations.stack_advice }}
+
+{{ recommendations.confidence_note }}
+{% for ref in recommendations.competitor_methods %}
+- Publicly documented approach — [{{ ref.name }}]({{ ref.url }}): {{ ref.method }}
+{% endfor %}
+
 ---
 *Filed by QArena — every fact above is replay-verified in a clean browser (zero AI in the verification loop).*

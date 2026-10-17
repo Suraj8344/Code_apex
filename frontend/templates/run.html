@@ -3,7 +3,7 @@
 {% block topnav %}
   <a class="pill" href="/expedition">+ new expedition</a>
   <span class="pill mono" id="status-pill">RUNNING</span>
-  <span class="pill mono ghost" title="LLM tokens used this run (0 = fully key-free / deterministic mode)">◉ <span id="tokens">0</span> tok</span>
+  <span class="pill mono ghost" title="LLM token usage. Zero means QArena ran in deterministic key-free mode, or the provider did not return usage data.">◉ <span id="tokens">0</span> LLM tok</span>
   <span class="pill mono ghost">⏱ <span id="clock">0:00</span></span>
 {% endblock %}
 {% block content %}
@@ -13,7 +13,17 @@
     <h1 class="run-target mono">{{ target }}</h1>
   </div>
   <a class="btn-ink" id="zip-btn" href="/api/runs/{{ run_id }}/zip" hidden>⬇ Download full evidence pack</a>
+  <a class="btn-ink" id="pdf-btn" href="/artifacts/{{ run_id }}/qarena_report.pdf" hidden>⬇ Download PDF report</a>
 </div>
+<section class="card team-tools" id="team-tools" {% if not project_id %}hidden{% endif %}>
+  <h2 class="card-title">Team reports <span class="stamp">ROLE VIEWS</span></h2>
+  <label for="report-role">View bugs for</label>
+  <select id="report-role"><option value="all">Full project report</option><option value="frontend">Frontend</option><option value="backend">Backend</option><option value="qa">QA engineer</option><option value="devops">DevOps</option><option value="lead">Project lead</option></select>
+  <button class="btn-small" id="role-load" type="button">Apply report view</button>
+  <a class="btn-small" id="role-download" href="/api/runs/{{ run_id }}/report/all/download">Download role report</a>
+  <button class="btn-small" id="share-report" type="button">Create share link</button>
+  <p id="share-result" class="micro" aria-live="polite"></p>
+</section>
 
 <ol class="trail-stepper" id="stepper" aria-label="pipeline stages">
   <li data-stage="2"><b>2</b> Set up</li>
@@ -94,6 +104,10 @@
   </div>
 
   <div class="cov-row mono" id="cov-row"></div>
+  <div class="card" id="run-advice" hidden>
+    <h2 class="card-title">Stack &amp; speed guidance</h2>
+    <p class="explain" id="run-advice-text"></p>
+  </div>
 
   <div id="specimens" class="specimens"></div>
 

@@ -104,11 +104,14 @@ class Reporter:
                 evidence={"screenshot": shot, "trace": trace,
                           "signals": [f"S{h.signal} {h.name}: {h.evidence[:160]}"
                                       for h in m["signals"]]})
-            md = self.jinja.get_template("bug_report.md.j2").render(bug=fb)
-            (reports_dir / f"{bug_id}.md").write_text(md)
+            from .recommendations import advise
+            md = self.jinja.get_template("bug_report.md.j2").render(
+                bug=fb, recommendations=advise(fb))
+            (reports_dir / f"{bug_id}.md").write_text(md, encoding="utf-8")
             filed.append(fb)
         (self.run_dir / "bugs_filed.json").write_text(
-            json.dumps([b.model_dump() for b in filed], indent=2))
+            json.dumps([b.model_dump() for b in filed], indent=2, ensure_ascii=False),
+            encoding="utf-8")
         return filed
 
     # ------------------------------------------------------------ severity

@@ -10,7 +10,7 @@ ARTIFACTS = Path(_os.environ.get(
     "QA_ARTIFACTS_DIR",
     "/tmp/qarena-artifacts" if _os.environ.get("VERCEL") else ROOT / "artifacts",
 ))
-AUTH_STATE = ROOT / "auth_state.json"
+AUTH_STATE = ARTIFACTS / "active_auth_state.json"
 AXE_JS = ROOT / "assets" / "axe.min.js"
 JINJA_DIR = ROOT / "jinja_templates"
 # Ground-truth for the benchmark scorer (Stage 8): point QA_TRUTH_JSON at any
@@ -63,6 +63,7 @@ LLM_MAX_TOKENS = 2200
 LLM_TIMEOUT_S = 45
 
 UI_PORT = 8088
+QUEUE_NAME = _os.environ.get("QA_QUEUE_NAME", "qarena")
 
 HEADLESS = True
 VIEWPORT = {"width": 1360, "height": 900}

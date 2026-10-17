@@ -24,6 +24,13 @@
     <p class="micro">Write the business rules you expect to hold — QArena checks the
     live app against exactly this text (the “intent check”), so be specific.</p>
 
+    <label for="project">Project team <span class="opt">optional</span></label>
+    <select id="project" name="project_id">
+      <option value="">Personal run — no team</option>
+      {% for p in projects %}<option value="{{ p.id }}">{{ p.name }} · {{ p.members|length }} members</option>{% endfor %}
+    </select>
+    <p class="micro">Create a team from the home page to share runs and role-specific reports.</p>
+
     <div class="two-col">
       <div>
         <label for="email">Test login email <span class="opt">optional</span></label>
@@ -88,6 +95,7 @@ document.getElementById("expedition").addEventListener("submit", async (e) => {
   const payload = {
     url: document.getElementById("url").value,
     description: document.getElementById("desc").value,
+    project_id: document.getElementById("project").value,
     email: document.getElementById("email").value,
     password: document.getElementById("password").value,
     whitebox: Object.keys(wb).length ? wb : null,

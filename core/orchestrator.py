@@ -8,6 +8,7 @@ Stage 2 sandbox -> 3b explore -> 4 plan -> 5a/5b execute+judge (per test)
 from __future__ import annotations
 
 import json
+import os
 import queue
 import shutil
 import threading
@@ -17,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import config
+from . import coordination
 from .contracts import (FiledBug, FlakySuspect, PossibleBug, RunResult,
                         TestCase)
 from .explorer import Explorer
@@ -47,14 +49,15 @@ class Orchestrator:
     # ------------------------------------------------------------ lifecycle
     def start_run(self, target_url: str, description: str,
                   email: str = "", password: str = "",
-                  whitebox: dict | None = None) -> str:
-        run_id = uuid.uuid4().hex[:10]
-        handle = RunHandle(run_id=run_id)
+                  whitebox: dict | None = None, project_id: str = "",
+                  run_id: str | None = None) -> str:
+        run_id = run_id or uuid.uuid4().hex[:10]
         run_dir = config.ARTIFACTS / f"run_{run_id}"
         run_dir.mkdir(parents=True, exist_ok=True)
+        handle = RunHandle(run_id=run_id)
         handle.run_dir = run_dir
         handle.result = RunResult(run_id=run_id, target_url=target_url,
-                                  description=description)
+                                  description=description, project_id=project_id)
         t = threading.Thread(
             target=self._safe_pipeline,
             args=(handle, target_url, description, email, password, whitebox),
@@ -64,6 +67,41 @@ class Orchestrator:
         t.start()
         return run_id
 
+    def run_job(self, run_id: str, payload: dict) -> None:
+        """Execute a queued expedition synchronously inside the durable worker."""
+        run_dir = config.ARTIFACTS / f"run_{run_id}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        handle = RunHandle(run_id=run_id, run_dir=run_dir)
+        handle.result = RunResult(run_id=run_id, target_url=payload["url"],
+                                  description=payload["description"],
+                                  project_id=payload.get("project_id", ""))
+        self.runs[run_id] = handle
+        coordination.save_result(run_id, handle.result.model_dump())
+        self._safe_pipeline(handle, payload["url"], payload["description"],
+                            payload.get("email", ""), payload.get("password", ""),
+                            payload.get("whitebox"))
+
+    @staticmethod
+    def _upload_run_artifacts(run_id: str, run_dir: Path) -> None:
+        """Copy finished evidence to shared S3-compatible object storage when configured."""
+        import os
+        bucket = os.getenv("QA_S3_BUCKET")
+        if not bucket:
+            return
+        import boto3
+        client = boto3.client(
+            "s3", endpoint_url=os.getenv("QA_S3_ENDPOINT_URL") or None,
+            region_name=os.getenv("AWS_REGION") or os.getenv("QA_S3_REGION") or None,
+            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"))
+        prefix = os.getenv("QA_S3_PREFIX", "qarena").strip("/")
+        archive = shutil.make_archive(str(run_dir), "zip", run_dir)
+        client.upload_file(archive, bucket, f"{prefix}/run_{run_id}.zip")
+        for path in run_dir.rglob("*"):
+            if path.is_file():
+                key = f"{prefix}/run_{run_id}/{path.relative_to(run_dir).as_posix()}"
+                client.upload_file(str(path), bucket, key)
+
     def emit_of(self, run_id: str):
         h = self.runs[run_id]
 
@@ -71,8 +109,9 @@ class Orchestrator:
             e["ts"] = round(time.time(), 2)
             h.history.append(e)
             h.events.put(e)
+            coordination.publish_event(run_id, e)
             try:
-                with open(h.run_dir / "run.log", "a") as fh:
+                with open(h.run_dir / "run.log", "a", encoding="utf-8") as fh:
                     fh.write(json.dumps(e) + "\n")
             except Exception:
                 pass
@@ -90,8 +129,26 @@ class Orchestrator:
                 h.result.error = str(exc)
         finally:
             self._save(h)
-            h.events.put({"type": "done", "status": h.result.status if h.result else "error",
-                          "result": self._result_json(h)})
+            # Create a report for complete and early-stopped runs. Keep PDF
+            # failures isolated so they do not hide the original run result.
+            try:
+                from .pdf_report import create_pdf_report
+                create_pdf_report(h.result, h.run_dir / "qarena_report.pdf")
+            except Exception as exc:
+                h.events.put({"type": "log", "msg": f"PDF report generation failed: {exc}"})
+            if coordination.enabled() and os.getenv("QA_S3_BUCKET"):
+                try:
+                    self._upload_run_artifacts(h.run_id, h.run_dir)
+                except Exception as exc:
+                    if h.result:
+                        h.result.status = "error"
+                        h.result.error = f"Evidence upload failed: {exc}"
+                        self._save(h)
+            self._save(h)
+            done = {"type": "done", "status": h.result.status if h.result else "error",
+                    "result": self._result_json(h)}
+            h.events.put(done)
+            coordination.publish_event(h.run_id, done)
 
     def _pipeline(self, h: RunHandle, url: str, desc: str,
                   email: str, password: str, whitebox: dict | None):
@@ -100,8 +157,13 @@ class Orchestrator:
         emit = self.emit_of(h.run_id)
         res = h.result
         res.llm_mode = "litellm" if llm.available else "heuristic (key-free)"
+        stage_started = time.monotonic()
 
         def stage(n: int, name: str):
+            nonlocal stage_started
+            if n >= 3 and res.status == "running":
+                res.stage_timings[name] = round(time.monotonic() - stage_started, 2)
+            stage_started = time.monotonic()
             emit({"type": "stage", "stage": n, "name": name})
 
         try:
@@ -118,8 +180,8 @@ class Orchestrator:
                 ok = sbx.login_once(email, password)
                 emit({"type": "log", "msg": f"login-once: {'ok' if ok else 'skipped/failed'}"})
             else:
-                if config.AUTH_STATE.exists():
-                    config.AUTH_STATE.unlink()
+                if sbx.auth_state_path.exists():
+                    sbx.auth_state_path.unlink()
 
             # ------------------------------- STAGE 3b: exploration
             stage(3, "Explorer — mapping the territory")
@@ -200,7 +262,15 @@ class Orchestrator:
             # ------------------------------- STAGE 6a: replay verification
             stage(6, "Replay Verifier — proving suspects in clean browsers")
             confirmed: list[tuple[PossibleBug, str]] = []
-            for pb in suspects:
+            for suspect_index, pb in enumerate(suspects):
+                if time.time() - t0 > config.RUN_WALL_CLOCK_S:
+                    emit({"type": "log", "msg": "run time budget reached; remaining candidates kept in the unproven watchlist"})
+                    res.flaky.extend(FlakySuspect(
+                        journey=f"{pending.journey} [{pending.group}]", summary=pending.summary[:200],
+                        reproduced="not checked", signals=[signal.signal for signal in pending.signals],
+                        status="not_checked")
+                        for pending in suspects[suspect_index:])
+                    break
                 ok, count = verifier.verify(pb)
                 if ok:
                     confirmed.append((pb, count))
@@ -222,8 +292,8 @@ class Orchestrator:
             stage(7, "Exporter — pytest suite, self-verified green")
             exporter = Exporter(h.run_dir, url)
             files = exporter.export(passed_cases)
-            keep, pytest_log = exporter.self_verify(files)
-            (h.run_dir / "pytest_self_run.log").write_text(pytest_log)
+            keep, pytest_log = exporter.self_verify(files) if files else ([], "No passing journeys were eligible for export.\n")
+            (h.run_dir / "pytest_self_run.log").write_text(pytest_log, encoding="utf-8")
             res.exported_tests = keep
             res.tests_passed = len(passed_cases)
             res.coverage = self._coverage(appmap, cases, passed_cases)
@@ -233,8 +303,11 @@ class Orchestrator:
             from scorer.evaluate_benchmark import evaluate
             res.benchmark = evaluate(h.run_dir)
             res.tokens_used = llm.total_tokens
+            res.stage_timings["benchmark"] = round(time.monotonic() - stage_started, 2)
             res.status = "done"
         finally:
+            # Preserve usage even when a later report/export stage fails.
+            res.tokens_used = llm.total_tokens
             sbx.shutdown()
 
     # ---------------------------------------------------------------- misc
@@ -298,8 +371,11 @@ class Orchestrator:
 
     def _save(self, h: RunHandle) -> None:
         if h.result and h.run_dir:
-            (h.run_dir / "results.json").write_text(
-                h.result.model_dump_json(indent=2))
+            destination = h.run_dir / "results.json"
+            temporary = h.run_dir / "results.json.tmp"
+            temporary.write_text(h.result.model_dump_json(indent=2), encoding="utf-8")
+            os.replace(temporary, destination)
+            coordination.save_result(h.run_id, h.result.model_dump())
 
     # ------------------------------------------------------------- utilities
     def latest_run(self) -> RunHandle | None:

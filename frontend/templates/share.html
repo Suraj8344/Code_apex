@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Shared QA report — QArena{% endblock %}
+{% block content %}
+<section class="hero">
+  <p class="kicker">SHARED TEAM REPORT</p>
+  <h1 id="share-title">Loading report…</h1>
+  <p class="sub" id="share-summary"></p>
+</section>
+<section class="card"><div id="share-bugs" class="specimens"></div><p id="share-empty" class="micro" hidden>No bugs are assigned to this role in the shared report.</p></section>
+<script>
+(async () => {
+  const token = {{ token|tojson }};
+  const response = await fetch(`/api/share/${encodeURIComponent(token)}`);
+  const report = await response.json();
+  if (!response.ok) { document.getElementById("share-title").textContent = report.detail || "Report unavailable"; return; }
+  document.getElementById("share-title").textContent = `${report.role_name} · QA report`;
+  document.getElementById("share-summary").textContent = `${report.target_url} · ${report.bugs.length} findings · ${report.status}`;
+  if (!report.bugs.length) document.getElementById("share-empty").hidden = false;
+  const escapeHtml = (s) => String(s ?? "").replace(/[&<>\"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;"}[c]));
+  document.getElementById("share-bugs").innerHTML = report.bugs.map((bug) => `<article class="spec"><span class="sev ${escapeHtml(bug.severity)}">${escapeHtml(bug.severity)}</span><span class="sid">${escapeHtml(bug.bug_id)}</span><h3>${escapeHtml(bug.title)}</h3><div class="loc">${escapeHtml(bug.route)} · ${escapeHtml(bug.journey)}</div><div class="qa"><b>Expected:</b> ${escapeHtml(bug.expected_behavior)}</div><div class="qa"><b>Actual:</b> ${escapeHtml(bug.actual_behavior)}</div><p class="repro">Reproduced ${escapeHtml(bug.reproduced_count)}</p><ol>${(bug.steps_to_reproduce || []).map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol></article>`).join("");
+})();
+</script>
+{% endblock %}

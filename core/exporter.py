@@ -36,7 +36,7 @@ class Exporter:
             body = tpl.render(tc=tc, target_url=self.target_url,
                               slug=self._slug(tc.test_id + "_" + tc.title))
             f = self.out_dir / f"test_{self._slug(tc.test_id + '_' + tc.title)}.py"
-            f.write_text(body)
+            f.write_text(body, encoding="utf-8")
             files.append(f.name)
         return files
 

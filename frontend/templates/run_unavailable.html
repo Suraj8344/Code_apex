@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Run unavailable — QArena{% endblock %}
+{% block content %}
+<section class="hero">
+  <p class="kicker">EXPEDITION #{{ run_id }}</p>
+  <h1>This browser run can’t reconnect.</h1>
+  <p class="sub">{{ message }}</p>
+  <p><a class="btn-ink" href="/expedition">Start a new expedition</a></p>
+</section>
+{% if events %}<section class="card"><h2 class="card-title">Progress saved before disconnect</h2><ul class="ledger">{% for event in events %}<li>{{ event.stage or event.msg or event.type }}</li>{% endfor %}</ul></section>{% endif %}
+{% endblock %}

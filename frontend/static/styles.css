@@ -63,6 +63,8 @@ a{color:var(--forest)}
   font-size:13px;border:1.5px solid var(--ink);border-radius:6px;background:#fff;
   color:var(--ink)}
 .form-card textarea{resize:vertical;line-height:1.5}
+.form-card select,.team-tools select{width:100%;padding:10px 12px;font:13px var(--mono);border:1.5px solid var(--ink);border-radius:6px;background:#fff;color:var(--ink)}
+.project-hub{margin:32px 0}.team-form,.member-form{display:flex;gap:10px;align-items:end;flex-wrap:wrap}.team-form label{display:grid;gap:5px;font-size:13px;font-weight:700}.team-form input,.member-form input,.member-form select{padding:9px 10px;border:1px solid var(--line);border-radius:5px;font:12px var(--mono);background:#fff}.member-form input{flex:1;min-width:150px}.member-form select{min-width:130px}.btn-small{border:1px solid var(--ink);background:var(--forest);color:#fff;border-radius:5px;padding:9px 13px;font:700 12px var(--mono);cursor:pointer}.projects-list{display:grid;gap:12px;margin-top:15px}.project-row{padding:14px;border:1px solid var(--line);border-radius:7px;background:#fff}.member-chips{display:flex;gap:6px;flex-wrap:wrap;margin:9px 0}.member-chips .chip{padding:4px 7px}.project-runs{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;font:12px var(--mono)}.project-runs a{padding:6px 9px;border:1px solid var(--line);border-radius:5px}.team-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.team-tools .card-title{width:100%;margin-bottom:0}.team-tools label{font-weight:bold}.team-tools select{width:auto;min-width:180px}.team-tools .micro{width:100%}
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .advanced{margin-top:14px;border:1px dashed var(--line);border-radius:6px;padding:10px 12px}
 .advanced summary{cursor:pointer;font-size:13.5px;font-weight:700}

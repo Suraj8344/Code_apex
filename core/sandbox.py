@@ -25,7 +25,8 @@ class Sandbox:
         self.artifacts = artifacts
         self.pw: Playwright | None = None
         self.browser: Browser | None = None
-        self.auth_state_path = config.AUTH_STATE
+        self.auth_state_path = artifacts / "auth_state.json"
+        self.auth_state_path.parent.mkdir(parents=True, exist_ok=True)
         self._app_proc: subprocess.Popen | None = None
 
     # ---- 1) optional local-app boot --------------------------------------
@@ -190,3 +191,7 @@ class Sandbox:
         finally:
             if self._app_proc:
                 self._app_proc.terminate()
+                try:
+                    self._app_proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self._app_proc.kill()

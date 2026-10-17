@@ -38,6 +38,27 @@
 </section>
 
 
+<section class="card project-hub" id="teams">
+  <div class="project-heading"><div><p class="kicker">TEAM WORKSPACE</p><h2 class="card-title">Projects &amp; teammates</h2><p class="micro">Create a project, assign roles, and keep runs and findings together.</p></div></div>
+  <form id="project-create" class="team-form">
+    <label>Project name<input name="name" required maxlength="80" placeholder="e.g. Shop app QA"></label>
+    <label>Team lead<input name="owner" required maxlength="80" placeholder="Your name"></label>
+    <button class="btn-small" type="submit">Create project</button>
+  </form>
+  <p id="project-feedback" class="micro" aria-live="polite"></p>
+  <div id="projects-list" class="projects-list">
+  {% for p in projects %}
+    <article class="project-row" data-project="{{ p.id }}">
+      <div><b>{{ p.name }}</b><span class="micro"> · led by {{ p.owner }} · {{ p.runs|length }} runs</span><div class="member-chips">{% for m in p.members %}<span class="chip">{{ m.name }} · {{ m.role }}</span>{% endfor %}</div></div>
+      <form class="member-form" data-project="{{ p.id }}">
+        <input name="name" required placeholder="Teammate name" aria-label="Teammate name"><input name="email" type="email" placeholder="Email (optional)" aria-label="Email">
+        <select name="role" aria-label="Role"><option value="frontend">Frontend</option><option value="backend">Backend</option><option value="qa">QA engineer</option><option value="devops">DevOps</option><option value="lead">Project lead</option></select><button class="btn-small" type="submit">Add member</button>
+      </form><div class="project-runs" data-runs="{{ p.id }}"></div>
+    </article>
+  {% else %}<p id="empty-projects" class="micro">No project teams yet. Create one to start sharing QA work.</p>{% endfor %}
+  </div>
+</section>
+
 <!-- ============================ HOW ============================ -->
 <section id="how">
   <h2 class="sec-title">One expedition, four moves</h2>
@@ -191,6 +212,27 @@
   }
   tick();
 })();
+
+const projectForm = document.getElementById("project-create");
+projectForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const response = await fetch("/api/projects", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(Object.fromEntries(new FormData(projectForm)))});
+  const data = await response.json();
+  if (!response.ok) { document.getElementById("project-feedback").textContent = data.detail || "Could not create project"; return; }
+  location.reload();
+});
+document.querySelectorAll(".member-form").forEach((form) => form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const response = await fetch(`/api/projects/${form.dataset.project}/members`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(Object.fromEntries(new FormData(form)))});
+  const data = await response.json();
+  if (response.ok) location.reload(); else document.getElementById("project-feedback").textContent = data.detail || "Could not add teammate";
+}));
+document.querySelectorAll("[data-runs]").forEach(async (box) => {
+  try {
+    const runs = await fetch(`/api/projects/${encodeURIComponent(box.dataset.runs)}/runs`).then((r) => r.json());
+    box.innerHTML = runs.length ? `<b>Recent runs</b>${runs.map((r) => `<a href="/runs/${encodeURIComponent(r.run_id)}">${r.run_id} · ${r.status} · ${r.bugs} bugs</a>`).join("")}` : "<span class='micro'>No runs yet</span>";
+  } catch (_) { box.textContent = "Run history unavailable"; }
+});
 
 /* ------- gentle reveal on scroll ------- */
 (function () {

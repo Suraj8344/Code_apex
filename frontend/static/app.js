@@ -7,6 +7,7 @@
     suspects: [], flaky: [], rejected: [], result: null,
     steps: 0, done: false,
   };
+  let fullResult = null;
   const t0 = Date.now();
   const clockTimer = setInterval(() => {
     const s = Math.floor((Date.now() - t0) / 1000);
@@ -115,8 +116,8 @@
         $("st-flaky").textContent = state.flaky.length;
         $("flaky-tray").hidden = false;
         renderTray("flaky-list", state.flaky,
-          (s) => `<b>${esc(humanSource(s.summary))}</b> — reappeared only ${esc(s.count)} of 3 tries`);
-        log(`✖ Dropped: ${humanSource(ev.journey)} — appeared only ${ev.count} of 3 replays, not solid enough to report`, "");
+          (s) => `<b>${esc(humanSource(s.summary))}</b> — ${s.count ? `reappeared only ${esc(s.count)} of 3 tries` : "not checked before the run time limit"}`);
+        log(ev.count ? `✖ Dropped: ${humanSource(ev.journey)} — appeared only ${ev.count} of 3 replays, not solid enough to report` : `◷ Not verified before run budget: ${humanSource(ev.journey)}`, "");
         break;
       case "step":
         state.steps += 1;
@@ -158,14 +159,21 @@
     pill.textContent = (result && result.status === "error") ? "STOPPED EARLY" : "COMPLETE";
     pill.className = "pill mono " + (result && result.status === "error" ? "error" : "done");
     $("zip-btn").hidden = false;
+    $("pdf-btn").hidden = false;
     $("findings").hidden = false;
-    const res = result || (await fetch(`/api/runs/${runId}/result`).then((r) => r.json()));
+    let res = result || {};
+    try {
+      const latest = await fetch(`/api/runs/${runId}/result`);
+      if (latest.ok) res = await latest.json();
+    } catch (_) { /* use the final SSE payload if the follow-up fetch is unavailable */ }
+    fullResult = res;
     // pin KPI tiles to results.json — history replay is a retelling, not accounting
     $("st-confirmed").textContent = (res.filed_bugs || []).length;
     if (res.steps_executed != null) $("st-steps").textContent = res.steps_executed;
     if (res.states_found != null) $("st-states").textContent = res.states_found;
     if (res.tests_planned != null) $("st-tests").textContent = res.tests_planned;
     renderFindings(res);
+    if (res.project_id) $("team-tools").hidden = false;
   }
 
   function renderFindings(res) {
@@ -196,6 +204,12 @@
         `${res.coverage.element_coverage}% of controls exercised (${res.coverage.elements_exercised}/${res.coverage.elements_total}) · ` +
         `${(res.exported_tests || []).length} reusable regression tests exported`;
     }
+    const timings = res.stage_timings || {};
+    const slowest = Object.entries(timings).sort((a, b) => b[1] - a[1])[0];
+    $("run-advice").hidden = false;
+    $("run-advice-text").textContent = slowest
+      ? `The longest measured QArena stage was ${slowest[0]} (${Number(slowest[1]).toFixed(1)} seconds). Optimize that measured stage first. This run does not inspect enough target source code to justify a React, Next.js, or Python migration; fix findings in the current stack and profile before changing architecture.`
+      : `No stage timings were recorded, so a performance bottleneck cannot be identified from this run. Browser findings alone do not justify changing the target's framework; use repository inspection and profiling first.`;
     const bugs = res.filed_bugs || [];
     if (bugs.length) {
       $("specimens").insertAdjacentHTML("beforebegin",
@@ -204,14 +218,14 @@
          <b class="sev Major">MAJOR</b> blocks or misleads users ·
          <b class="sev Minor">MINOR</b> fix when convenient</div>`);
     }
+    const hadNoTestCoverage = !res.states_found && !res.tests_planned && !res.steps_executed;
     $("specimens").innerHTML = bugs.length
       ? bugs.map(specCard).join("")
-      : `<div class="card clean-card"><h3>No proven bugs 🎉</h3>
-         <p class="explain">QArena hunted and found nothing it could prove. That is a
-         <strong>result</strong>, not a failure: anything uncertain sits in the
-         “dropped” tray instead of wasting your time. If you expected bugs, add more
-         detail to the description and run again — vague descriptions blunt the
-         business-rule judge.</p></div>`;
+      : res.status === "error" || hadNoTestCoverage
+        ? `<div class="card error-card"><h3>Bug status unknown</h3>
+           <p class="explain">QArena did not complete enough testing to determine whether this website has bugs. Zero confirmed bugs here does not mean the website is bug-free. Resolve the run error and try again.</p></div>`
+        : `<div class="card clean-card"><h3>No proven bugs 🎉</h3>
+           <p class="explain">QArena completed this run but did not confirm a bug in the journeys it tested. This does not prove the entire website is bug-free; results are limited to the pages and behaviors reached in this run.</p></div>`;
     if (res.exported_tests && res.exported_tests.length) {
       $("tests-card").hidden = false;
       $("tests-list").innerHTML = res.exported_tests
@@ -227,6 +241,30 @@
         .join("");
     }
   }
+
+  const roleLoad = $("role-load");
+  const roleDownload = $("role-download");
+  const reportRole = $("report-role");
+  if (reportRole && roleDownload) reportRole.addEventListener("change", () => {
+    roleDownload.href = `/api/runs/${runId}/report/${reportRole.value}/download`;
+  });
+  if (roleLoad) roleLoad.addEventListener("click", async () => {
+    const role = $("report-role").value;
+    const response = await fetch(`/api/runs/${runId}/report/${role}`);
+    if (!response.ok) return;
+    const view = await response.json();
+    if (!fullResult) fullResult = await fetch(`/api/runs/${runId}/result`).then((r) => r.json());
+    renderFindings({...fullResult, filed_bugs: view.bugs});
+    $("specimens").scrollIntoView({behavior: "smooth", block: "start"});
+  });
+  const shareBtn = $("share-report");
+  if (shareBtn) shareBtn.addEventListener("click", async () => {
+    const response = await fetch(`/api/runs/${runId}/share`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({role: $("report-role").value})});
+    const data = await response.json();
+    const shareUrl = new URL(data.url, location.origin).href;
+    try { await navigator.clipboard.writeText(shareUrl); $("share-result").textContent = `Share link copied: ${shareUrl}`; }
+    catch (_) { $("share-result").innerHTML = `Share link: <a href="${esc(shareUrl)}">${esc(shareUrl)}</a>`; }
+  });
 
   // turn machine titles into one sentence a non-engineer understands
   function headlineFor(b) {
@@ -264,6 +302,13 @@
     const untag = (s) => (s || "").replace(/S\d+ [A-Za-z ]+:/g, "").replace(/\s*\|\s*/g, " — ").trim();
     const wrong = untag(b.actual_behavior).slice(0, 240);
     const wanted = (b.expected_behavior || "").trim().slice(0, 240);
+    const rec = b.recommendations;
+    const suggestions = rec ? `<details class="qa recommendations"><summary>Likely cause &amp; fix suggestions</summary>
+      <p><b>Likely cause:</b> ${esc(rec.likely_cause)}</p>
+      <ul>${(rec.recommended_fix || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+      <p><b>Stack advice:</b> ${esc(rec.stack_advice)}</p>
+      <p class="micro">${esc(rec.confidence_note)}</p>
+      <p class="micro"><b>Publicly documented competitor approaches:</b> ${(rec.competitor_methods || []).map((x) => `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.name)}</a> — ${esc(x.method)}`).join(" · ")}</p></details>` : "";
     return `<article class="spec">
       <span class="sev ${esc(b.severity)}">${esc(b.severity)}</span>
       <span class="sid">${esc(b.bug_id)}</span>
@@ -275,6 +320,7 @@
       <div class="chipset">${chips}</div>
       <p class="repro">✔ proof: reproduced ${esc(b.reproduced_count)} in fresh browsers</p>
       ${steps ? `<p class="mini"><b>Try it yourself:</b></p><ol>${steps}</ol>` : ""}
+      ${suggestions}
       ${shot}
       <div class="actions">
         <a href="/artifacts/${runId}/bug_reports/${esc(b.bug_id)}.md">full report (.md)</a>
@@ -304,5 +350,22 @@
     if (ev.type === "ping") return;
     handle(ev);
   };
-  es.onerror = () => { if (!state.done) log("…reconnecting to the field unit"); };
+  es.onerror = async () => {
+    if (state.done) return;
+    try {
+      const response = await fetch(`/api/runs/${runId}/result`);
+      if (response.status === 410) {
+        const unavailable = await response.json();
+        clearInterval(clockTimer);
+        es.close();
+        const pill = $("status-pill");
+        pill.textContent = "RUN LOST";
+        pill.className = "pill mono error";
+        $("log").replaceChildren();
+        log(unavailable.message || "This run can’t reconnect to its browser worker. Start a new run on the persistent deployment.", "bug");
+        return;
+      }
+    } catch (_) { /* keep the reconnect path for temporary network drops */ }
+    log("…reconnecting to the field unit");
+  };
 })();

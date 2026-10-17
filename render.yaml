@@ -5,10 +5,57 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    healthCheckPath: /
+    healthCheckPath: /health
     envVars:
       - key: QA_ARTIFACTS_DIR
         value: /app/artifacts
+      - key: QARENA_LLM_MODEL
+        value: groq/openai/gpt-oss-120b
+      - key: GROQ_API_KEY
+        sync: false
+      - key: QUEUE_MODE
+        value: redis
+      - key: REDIS_URL
+        sync: false
+      - key: QA_S3_BUCKET
+        sync: false
+      - key: QA_S3_ENDPOINT_URL
+        sync: false
+      - key: QA_S3_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: QA_S3_PREFIX
+        value: qarena
+
+  - type: worker
+    name: qarena-browser-worker
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: rq worker qarena
+    envVars:
+      - key: QA_ARTIFACTS_DIR
+        value: /app/artifacts
+      - key: QUEUE_MODE
+        value: redis
+      - key: REDIS_URL
+        sync: false
+      - key: QA_S3_BUCKET
+        sync: false
+      - key: QA_S3_ENDPOINT_URL
+        sync: false
+      - key: QA_S3_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: QA_S3_PREFIX
+        value: qarena
       - key: QARENA_LLM_MODEL
         value: groq/openai/gpt-oss-120b
       - key: GROQ_API_KEY

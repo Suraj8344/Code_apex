@@ -131,12 +131,14 @@ class FlakySuspect(BaseModel):
     summary: str
     reproduced: str                      # "1/3"
     signals: list[int]
+    status: str = "flaky"
 
 
 class RunResult(BaseModel):
     run_id: str
     target_url: str
     description: str
+    project_id: str = ""
     status: str = "running"
     llm_mode: str = "heuristic"
     tokens_used: int = 0
@@ -147,6 +149,7 @@ class RunResult(BaseModel):
     filed_bugs: list[FiledBug] = Field(default_factory=list)
     flaky: list[FlakySuspect] = Field(default_factory=list)
     exported_tests: list[str] = Field(default_factory=list)
+    stage_timings: dict[str, float] = Field(default_factory=dict)
     rejected_steps: list[dict] = Field(default_factory=list)
     coverage: dict = Field(default_factory=dict)
     benchmark: dict = Field(default_factory=dict)
