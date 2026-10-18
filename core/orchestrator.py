@@ -250,7 +250,7 @@ class Orchestrator:
                 # "-$64.95 on /cart, /checkout, /order" is ONE filing
                 route_insens = pb.group.startswith(("intent:", "console:",
                                                     "form:money", "flow:badge",
-                                                    "axe:"))
+                                                    ))
                 key = ((pb.group,) if route_insens
                        else (self._route_of(pb), pb.group))
                 # final-gate contract groups ("silently accepted",
@@ -353,24 +353,41 @@ class Orchestrator:
 
     @staticmethod
     def _coverage(appmap, cases, passed) -> dict:
+        from .contracts import INTERACTIVE_ROLES
+        from .explorer import canonical_route
         routes_hit = set()
         for tc in cases:
             for st in tc.steps:
                 if st.action == "goto":
                     routes_hit.add(st.target)
         total_routes = len({s.route for s in appmap.states if s.http_status == 200})
-        elements_total = sum(len(s.elements) for s in appmap.states
-                             if s.http_status == 200)
+        elements_total = sum(sum(e.role in INTERACTIVE_ROLES for e in s.elements)
+                             for s in appmap.states if s.http_status == 200)
         exercised = set()
         for tc in cases:
             for st in tc.steps:
-                if st.role:
-                    exercised.add((st.role, st.name))
+                if st.role and st.action in ("click", "click_check_response", "fill",
+                                              "press", "select", "dblclick"):
+                    matching = [s for s in appmap.states
+                                if s.route == canonical_route(st.target)]
+                    for state in matching:
+                        if any(e.role == st.role and e.name == st.name for e in state.elements):
+                            exercised.add((state.state_id, st.role, st.name))
+        control_tests = sum(any(step.action == "click_check_response" for step in case.steps)
+                            for case in cases)
+        discovery = appmap.discovery or {}
         return {
             "route_coverage": round(min(1.0, len(routes_hit) / max(total_routes, 1)) * 100, 1),
             "routes_tested": len(routes_hit), "routes_total": total_routes,
             "element_coverage": round(min(1.0, len(exercised) / max(elements_total, 1)) * 100, 1),
             "elements_exercised": len(exercised), "elements_total": elements_total,
+            "safe_control_checks_planned": control_tests,
+            "safe_controls_not_probed": discovery.get("safe_controls_not_probed", 0),
+            "discovery_complete_within_scope": discovery.get("complete_within_scope", False),
+            "unvisited_observed_links": discovery.get("unvisited_observed_links", 0),
+            "observed_links_beyond_depth_limit": discovery.get("observed_links_beyond_depth_limit", 0),
+            "theme_review_candidates": discovery.get("theme_review_candidates", []),
+            "theme_review_note": discovery.get("theme_review_note", ""),
         }
 
     @staticmethod

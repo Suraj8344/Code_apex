@@ -91,24 +91,28 @@ class Judge:
                 add(f"flow:{c[5:][:48]}", _hit(6, c[5:]))
             elif c.startswith("expect:"):
                 add(f"expect:{c[7:][:48]}", _hit(6, c[7:]))
+            elif c.startswith("control:"):
+                add(f"control:{c[8:][:48]}", _hit(6, c[8:]))
 
         # ---- S6 groups from deterministic intent findings -------------------
         for fnd in ev.intent_findings:
             add(f"intent:{fnd[:48]}", _hit(6, fnd))
 
-        # ---- S5 groups per serious axe violation id -------------------------
-        # Structural naming violations may be filed on their own strength;
-        # other serious axe hits stay assistive (need a second signal).
-        SOLO_OK = {"label", "button-name", "input-image-alt", "image-alt",
-                   "select-name", "frame-title", "aria-required-children",
-                   "color-contrast", "a11y-placeholder-only-label"}
+        # Include every axe impact level. Axe supplies rule-specific evidence;
+        # replay verification filters transient page states before filing.
         for v in ev.axe_violations:
-            if v.get("impact") in ("serious", "critical"):
-                hit = _hit(5, f"{v['id']} on {v.get('target', 'page')} — "
-                              f"{v.get('help', '')}")
-                if v["id"] in SOLO_OK:
-                    hit.weight = 0.55
-                add(f"axe:{v['id']}", hit)
+            impact = v.get("impact", "minor")
+            hit = _hit(5, f"{v['id']} ({impact}) on {v.get('target', 'page')} — "
+                          f"{v.get('failure_summary') or v.get('help', '')}")
+            # A single deterministic accessibility rule hit is a reportable
+            # minor finding after the normal replay gate, even without a second signal.
+            if impact == "minor":
+                hit.weight = 0.51
+            elif impact == "moderate":
+                hit.weight = 0.55
+            elif impact in ("serious", "critical"):
+                hit.weight = 0.60
+            add(f"axe:{v['id']}:{v.get('target', '')}", hit)
 
         out: list[PossibleBug] = []
         for g in groups.values():

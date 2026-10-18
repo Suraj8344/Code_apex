@@ -54,8 +54,7 @@ class Planner:
         valid, rejected = self.reject_invented(cases)
         valid, unsupported = self.reject_unsupported_expectations(valid)
         rejected.extend(unsupported)
-        # Keep one test per title/route to avoid the model duplicating the
-        # deterministic, evidence-based navigation checks.
+        # Keep one test per title/route to avoid duplicate navigation checks.
         unique: list[TestCase] = []
         seen: set[tuple[str, tuple[str, ...]]] = set()
         for case in valid:
@@ -66,7 +65,10 @@ class Planner:
             seen.add(key)
             case.priority_score = self.priority(case)
             unique.append(case)
-        unique.sort(key=lambda item: item.priority_score, reverse=True)
+        # Route smoke checks come first: an AI-selected journey must not crowd
+        # discovered pages out of a comprehensive report.
+        unique.sort(key=lambda item: (0 if item.title.startswith("Observed page ") else 1,
+                                      -item.priority_score))
         return unique[:config.MAX_TESTS], rejected
 
     def llm_plan(self) -> list[TestCase]:
@@ -168,7 +170,7 @@ class Planner:
                 target = self._target_for_state(source)
                 add(f'Observed control "{label}" on {source.route} responds', target,
                     [StepSpec(step=1, action="goto", target=target),
-                     StepSpec(step=2, action="click", role="button", name=label)])
+                     StepSpec(step=2, action="click_check_response", role="button", name=label)])
 
         linked_routes: set[str] = set()
         for edge in self.map.edges:
@@ -248,7 +250,7 @@ class Planner:
                     route = self._route_key(step.target)
                     if route not in allowed_routes:
                         invalid.append(f"unobserved route {step.target}")
-                elif step.action in ("click", "fill", "select", "dblclick", "press"):
+                elif step.action in ("click", "click_check_response", "fill", "select", "dblclick", "press"):
                     if not self._observed_element(route, step.role, step.name):
                         invalid.append(f'{step.action} {step.role} "{step.name}" on {route}')
             if invalid:

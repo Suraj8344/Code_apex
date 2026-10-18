@@ -26,6 +26,7 @@ class AppState(BaseModel):
     url: str                         # representative concrete URL
     title: str = ""
     summary: str = ""                # short visible-page context for grounded AI planning
+    theme_profile: dict = Field(default_factory=dict)
     state_hash: str
     http_status: int = 200
     access_blocked_reason: str = ""
@@ -39,13 +40,14 @@ class AppMap(BaseModel):
     edges: list[dict] = Field(default_factory=list)       # {from, to, via}
     catalog_prices: dict[str, int] = Field(default_factory=dict)  # name -> cents
     generated_by: str = "explorer"
+    discovery: dict = Field(default_factory=dict)  # crawl cap/completeness details
 
 
 # ------------------------------------------------------------------- Stage 4
 class StepSpec(BaseModel):
     step: int
     action: Literal["goto", "click", "dblclick", "fill", "press", "select",
-                    "check_text", "assert_badge", "wait"]
+                    "check_text", "assert_badge", "click_check_response", "wait"]
     target: str = ""                 # route for goto; text for check_text; value otherwise
     role: str = ""                   # element roles for click/fill/select/dblclick/press
     name: str = ""                   # accessible name
@@ -87,7 +89,7 @@ class StepEvidence(BaseModel):
     console_errors: list[str] = Field(default_factory=list)
     http_failures: list[dict] = Field(default_factory=list)   # {method,url,status}
     broken_items: list[dict] = Field(default_factory=list)    # {kind,name,detail}
-    axe_violations: list[dict] = Field(default_factory=list)  # {id,impact,target}
+    axe_violations: list[dict] = Field(default_factory=list)
     contract_failures: list[str] = Field(default_factory=list)
     intent_findings: list[str] = Field(default_factory=list)
 

@@ -20,11 +20,12 @@ SAMPLE_APP_BUGS = Path(_os.environ.get("QA_TRUTH_JSON",
                                        ROOT / "sample_app" / "bugs.json"))
 
 # ---- Hard run limits (Stage 2 step 4) -----------------------------------
-MAX_STATES = 40              # explorer: unique HTML page states
-MAX_CRAWL_ACTIONS = 100      # explorer: crawl actions
+MAX_STATES = 120             # detailed site-wide crawl; report when the cap is reached
+MAX_CRAWL_ACTIONS = 600      # crawler actions, including observed same-origin routes
 MAX_STEPS_PER_TEST = 14      # tester: steps per generated test case
-MAX_TESTS = 16               # planner output cap executed
-RUN_WALL_CLOCK_S = 480       # whole-run budget
+MAX_TESTS = 240              # route checks first, then safe control checks
+RUN_WALL_CLOCK_S = 1800      # broad audit budget; uncompleted checks are listed in coverage
+MAX_CRAWL_DEPTH = 8
 STEP_TIMEOUT_MS = 3500       # element resolution timeout
 NAV_TIMEOUT_MS = 10000
 

@@ -80,7 +80,10 @@ class Explorer:
         self._visited_urls: set[str] = set()
         self._link_status: dict[str, int] = {}
         self._probed_buttons: set[tuple[str, str]] = set()
-        self._safe_button_budget = 16
+        self._safe_button_budget = 80
+        self._safe_controls_not_probed = 0
+        self._frontier_remaining = 0
+        self._crawl_actions = 0
 
     # ---------------------------------------------------------------- main
     def explore(self, description: str) -> AppMap:
@@ -96,6 +99,7 @@ class Explorer:
         for gl in guest_links:
             frontier.append((gl, 0))
         actions = 0
+        depth_capped = 0
 
         while frontier and actions < config.MAX_CRAWL_ACTIONS \
                 and len(self.appmap.states) < config.MAX_STATES:
@@ -114,7 +118,7 @@ class Explorer:
                 # misleading coverage and false-positive route findings.
                 break
             # enqueue discovered links (GET-only navigation)
-            if depth < 4:
+            if depth < config.MAX_CRAWL_DEPTH:
                 ordered_links = self._prioritize_links(state, links)
                 # Follow the most promising observed navigation path first,
                 # like a user exploring one section before returning to menus.
@@ -125,17 +129,54 @@ class Explorer:
                         self.appmap.edges.append(
                             {"from": state.state_id, "to": canonical_route(nxt),
                              "via": f'link "{lname}"'})
+            else:
+                depth_capped += len(links)
             # Expand only clearly navigational/reveal controls, in their own
             # browser context. Form submitters and consequential actions are
             # never clicked by the explorer.
             for element in state.elements:
+                key = (state.state_id, element.name)
                 if (element.role == "button" and element.enabled
                         and is_safe_exploration_button(element.name)
-                        and self._safe_button_budget > 0
-                        and (state.state_id, element.name) not in self._probed_buttons):
-                    self._probe_safe_button(state, element, frontier, depth)
-                    self._safe_button_budget -= 1
-                    self._probed_buttons.add((state.state_id, element.name))
+                        and key not in self._probed_buttons):
+                    if self._safe_button_budget > 0:
+                        self._probe_safe_button(state, element, frontier, depth)
+                        self._safe_button_budget -= 1
+                        self._probed_buttons.add(key)
+                    else:
+                        self._safe_controls_not_probed += 1
+        self._frontier_remaining = sum(
+            1 for url, _ in frontier if url not in self._visited_urls and self._in_scope(url))
+        self._crawl_actions = actions
+        self.appmap.discovery = {
+            "pages_discovered": len(self.appmap.states),
+            "crawl_actions": actions,
+            "unvisited_observed_links": self._frontier_remaining,
+            "state_limit": config.MAX_STATES,
+            "action_limit": config.MAX_CRAWL_ACTIONS,
+            "depth_limit": config.MAX_CRAWL_DEPTH,
+            "observed_links_beyond_depth_limit": depth_capped,
+            "safe_controls_not_probed": self._safe_controls_not_probed,
+            "complete_within_scope": self._frontier_remaining == 0
+                and actions < config.MAX_CRAWL_ACTIONS
+                and len(self.appmap.states) < config.MAX_STATES
+                and depth_capped == 0,
+        }
+        shell_profiles = {}
+        for state in self.appmap.states:
+            shell = state.theme_profile.get("shell")
+            if shell:
+                key = json.dumps(shell, sort_keys=True)
+                shell_profiles.setdefault(key, []).append(state.route)
+        if len(shell_profiles) > 1:
+            common = max(shell_profiles.values(), key=len)
+            self.appmap.discovery["theme_review_candidates"] = sorted({
+                route for routes in shell_profiles.values() if routes is not common
+                for route in routes
+            })
+            self.appmap.discovery["theme_review_note"] = (
+                "Shared header/navigation computed styles vary across pages. "
+                "This is a visual review cue, not an asserted defect; pages may intentionally use different shells.")
         ctx.close()
         self._persist()
         self._render_map()
@@ -207,7 +248,7 @@ class Explorer:
                     "via": f'button "{element.name}"'}
             if edge not in self.appmap.edges:
                 self.appmap.edges.append(edge)
-            if discovered and not discovered.access_blocked_reason and depth < 3:
+            if discovered and not discovered.access_blocked_reason and depth < config.MAX_CRAWL_DEPTH - 1:
                 for href, label in links:
                     nxt = urljoin(page.url, href).split("#")[0]
                     if self._in_scope(nxt) and nxt not in self._visited_urls:
@@ -250,6 +291,18 @@ class Explorer:
             snap = page.locator("body").aria_snapshot(timeout=2500)
         except Exception:
             snap = ""
+        try:
+            theme_profile = page.evaluate("""() => {
+              const css = el => {
+                if (!el) return null;
+                const s = getComputedStyle(el);
+                return {background:s.backgroundColor, color:s.color, font:s.fontFamily};
+              };
+              return {body:css(document.body), shell:css(document.querySelector('header, nav, [role=banner]')),
+                colorScheme:getComputedStyle(document.documentElement).colorScheme || ''};
+            }""")
+        except Exception:
+            theme_profile = {}
         elements = parse_aria_snapshot(snap)
         route = canonical_route(page.url)
         shash = state_signature(route, elements, status)
@@ -265,7 +318,7 @@ class Explorer:
             summary=" ".join([title] + [e["name"] for e in elements
                                        if e["role"] == "heading"] +
                               [re.sub(r"\s+", " ", body_text)[:700]])[:1100],
-            state_hash=shash, http_status=status,
+            state_hash=shash, http_status=status, theme_profile=theme_profile,
             access_blocked_reason=blocked_reason,
             elements=[StateElement(id=f"{state_id}e{i}", role=e["role"],
                                    name=e["name"])

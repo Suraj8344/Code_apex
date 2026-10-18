@@ -137,6 +137,17 @@ def create_pdf_report(result, output: Path) -> Path:
     benchmark = result.benchmark or {}
     lines = [f"Route coverage: {coverage.get('route_coverage', 'N/A')}% ({coverage.get('routes_tested', 0)}/{coverage.get('routes_total', 0)} routes)",
              f"Element coverage: {coverage.get('element_coverage', 'N/A')}% ({coverage.get('elements_exercised', 0)}/{coverage.get('elements_total', 0)} elements)"]
+    lines.append(f"Safe control response checks planned: {coverage.get('safe_control_checks_planned', 0)}")
+    if coverage.get("safe_controls_not_probed"):
+        lines.append(f"Safe visible controls left unchecked because the interaction budget was reached: {coverage['safe_controls_not_probed']}")
+    if coverage.get("discovery_complete_within_scope"):
+        lines.append("Discovery: no observed same-origin links remained within configured crawl limits.")
+    else:
+        lines.append(f"Discovery is incomplete: {coverage.get('unvisited_observed_links', 0)} observed links remain; {coverage.get('observed_links_beyond_depth_limit', 0)} links were beyond the crawl depth limit. A clean result is inconclusive for unchecked pages.")
+    if coverage.get("theme_review_candidates"):
+        lines.append("Theme review candidates (shared shell style differs; visual cues, not confirmed defects): " + ", ".join(coverage["theme_review_candidates"]))
+        if coverage.get("theme_review_note"):
+            lines.append(coverage["theme_review_note"])
     if benchmark:
         lines.append("Benchmark: " + "; ".join(f"{k}: {v}" for k, v in benchmark.items()))
     else:

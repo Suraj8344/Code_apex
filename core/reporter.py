@@ -68,10 +68,12 @@ class Reporter:
             # route-insensitive groups already deduped globally — pin them to
             # the richest step's filing instead (keeps console/intent/etc at one)
             if pb.group.startswith(("intent:", "console:", "form:money",
-                                    "flow:", "axe:")):
+                                    "flow:")):
                 ckey = ("content", pb.test_id, "money" if "money" in pb.group or
                         "money" in pb.summary.lower() or "-$" in pb.summary
                         else pb.group.split(":")[0])
+            elif pb.group.startswith("axe:"):
+                ckey = ("axe", m["route"], pb.group)
             else:
                 ckey = ("http", self._route_of(
                     pb.evidence.url_after or pb.evidence.url_before), pb.test_id)
@@ -131,6 +133,11 @@ class Reporter:
             for b in pb.evidence.broken_items:
                 if b.get("name"):
                     return b["name"]
+        if g.startswith("axe:"):
+            _, rule_id, target = (g.split(":", 2) + [""])[:3]
+            for violation in pb.evidence.axe_violations:
+                if violation.get("id") == rule_id and violation.get("target", "") == target:
+                    return f"@{target[:40]}"
         if g.startswith("intent:"):
             m = re.search(r"'([^']{3,40})'", g)
             if m:
@@ -149,6 +156,15 @@ class Reporter:
         return pb.evidence.target or "page"
     @staticmethod
     def _severity(pb: PossibleBug) -> str:
+        if pb.group.startswith("axe:"):
+            rule_id = pb.group.split(":", 2)[1]
+            violation = next((item for item in pb.evidence.axe_violations
+                              if item.get("id") == rule_id), {})
+            return {"critical": "Critical", "serious": "Major",
+                    "moderate": "Minor", "minor": "Minor"}.get(
+                        violation.get("impact", "minor"), "Minor")
+        if pb.group.startswith("control:"):
+            return "Minor"
         blob = (pb.summary + " " + pb.journey).lower()
         sig = {h.signal for h in pb.signals}
         if "negative" in blob and "$" in blob or "price mismatch" in blob:
@@ -209,18 +225,31 @@ class Reporter:
     @staticmethod
     def _expect_actual(pb: PossibleBug) -> tuple[str, str]:
         signals = {hit.signal for hit in pb.signals}
-        if 5 in signals and pb.evidence.axe_violations:
-            violation = pb.evidence.axe_violations[0]
-            expected = f"{violation.get('help') or 'The element should meet the applicable accessibility requirement.'}"
+        if pb.group.startswith("control:"):
+            expected = "Clicking an enabled control should produce an observable response in its state, nearby content, or page navigation."
+            actual = pb.evidence.note
+        elif 5 in signals and pb.evidence.axe_violations:
+            violation_id = pb.group.split(":", 2)[1] if pb.group.startswith("axe:") else ""
+            violation = next((v for v in pb.evidence.axe_violations
+                              if v.get("id") == violation_id),
+                             pb.evidence.axe_violations[0])
+            expected = violation.get("help") or "The element should meet the applicable accessibility requirement."
+            actual = (f"{violation.get('impact', 'minor').title()} impact on "
+                      f"{violation.get('target', 'page')}: "
+                      f"{violation.get('failure_summary') or violation.get('description') or violation.get('help', '')}")
         elif 4 in signals:
             expected = "The observed form action should follow the stated application requirements."
+            actual = pb.summary
         elif 2 in signals:
             expected = "A first-party document or API request required by this observed journey should complete successfully."
+            actual = pb.summary
         elif 3 in signals:
             expected = "Visible images and links used by this page should load or lead to available content."
+            actual = pb.summary
         elif 1 in signals:
             expected = "The page should not raise an uncaught JavaScript runtime error during this journey."
+            actual = pb.summary
         else:
             expected = "The observed behavior should match the requirements and controls on this page."
-        actual = f"{pb.summary} — observed during journey: {pb.journey}"
+        actual += f" — observed during journey: {pb.journey}"
         return expected, actual

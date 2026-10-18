@@ -5,7 +5,9 @@ import re
 
 _SAFE_BUTTON = re.compile(
     r"^(open|view|show|expand|learn|explore|browse|next|previous|back|"
-    r"menu|options|details|tab|start learning|start exploring)\b", re.I)
+    r"menu|options|details|tab|start learning|start exploring|run|apply|"
+    r"random|play|pause|reset|prev|check answer|check|try again|filter|"
+    r"sort|all|easy|medium|hard)\b", re.I)
 _RISKY_BUTTON = re.compile(
     r"\b(delete|remove|logout|log out|sign out|buy|purchase|pay|checkout|"
     r"submit|send|save|create|register|sign up|publish|invite|transfer|"

@@ -206,9 +206,17 @@
         : "no planted bug escaped — every one found and proven 🎉";
     }
     if (res.coverage && res.coverage.routes_total) {
+      const discoveryStatus = res.coverage.discovery_complete_within_scope
+        ? "discovery complete within limits"
+        : `discovery incomplete: ${res.coverage.unvisited_observed_links || 0} observed links remain`;
+      const themeStatus = (res.coverage.theme_review_candidates || []).length
+        ? `theme review: ${(res.coverage.theme_review_candidates || []).slice(0, 8).join(", ")}${(res.coverage.theme_review_candidates || []).length > 8 ? ` and ${(res.coverage.theme_review_candidates || []).length - 8} more` : ""}`
+        : "no shared-shell style variation detected";
       $("cov-row").textContent =
         `Coverage: ${res.coverage.route_coverage}% of pages tested (${res.coverage.routes_tested}/${res.coverage.routes_total}) · ` +
         `${res.coverage.element_coverage}% of controls exercised (${res.coverage.elements_exercised}/${res.coverage.elements_total}) · ` +
+        `${res.coverage.safe_control_checks_planned || 0} safe control response checks · ` +
+        `${discoveryStatus} · ${themeStatus} · ` +
         `${(res.exported_tests || []).length} reusable regression tests exported`;
     }
     const timings = res.stage_timings || {};

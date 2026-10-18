@@ -36,7 +36,9 @@ class Tester:
     def run_test(self, tc: TestCase, tracing: bool = True) -> tuple[str, list[StepEvidence]]:
         """Executes one TestCase. Returns (verdict, evidence-per-step)."""
         evidences: list[StepEvidence] = []
-        ctx = self.sbx.new_context(with_auth=True, tracing=tracing)
+        read_only_probe = any(s.action == "click_check_response" for s in tc.steps)
+        ctx = self.sbx.new_context(with_auth=not read_only_probe, tracing=tracing,
+                                  guard="probe" if read_only_probe else "tester")
         page = ctx.new_page()
         console_errors: list[str] = []
         http_failures: list[dict] = []
@@ -112,6 +114,10 @@ class Tester:
             ev.note = f"{exc.__class__.__name__}: {str(exc)[:140]}"
         self._capture(page, ev, spec, tc, i, console_errors, http_failures,
                       c0, h0, steps_dir)
+        if (spec.action == "click_check_response" and ev.status == "failed"
+                and "no observable response" in ev.note):
+            ev.contract_failures.append(
+                f"control:{spec.role} '{spec.name}' did not change visible or semantic state after click")
         return ev, ev.status == "error"
 
     def _capture(self, page, ev: StepEvidence, spec: StepSpec, tc: TestCase,
@@ -167,7 +173,37 @@ class Tester:
                 return False, f'text missing: "{spec.target}"'
         elif a == "assert_badge":
             return self._check_badge(page, int(spec.target or "1"))
+        elif a == "click_check_response":
+            if el.evaluate("e => !!e.closest('form') || e.type === 'submit'"):
+                return False, "skipped: control belongs to a form; submit actions are not auto-tested"
+            before = self._control_fingerprint(el)
+            old_url = page.url
+            blocked_start = len(self.sbx.readonly_blocked_requests)
+            el.click()
+            page.wait_for_timeout(500)
+            blocked = self.sbx.readonly_blocked_requests[blocked_start:]
+            if blocked:
+                return True, "not assessed: this control attempted a write request, which QArena blocked for safety"
+            if page.url != old_url:
+                return True, f"observable response verified: navigated to {page.url}"
+            after = self._control_fingerprint(el)
+            if before == after:
+                return False, "no observable response: button, nearby content, and page state did not change after click"
+            return True, "observable response verified after click"
         return True, ""
+
+    @staticmethod
+    def _control_fingerprint(el) -> str:
+        """Stable state around a button; ignore whole-page clocks/animations."""
+        return el.evaluate("""e => {
+          const row = e.closest('tr,[role=row],article,li,[class*=card],[class*=Card]') || e.parentElement;
+          const norm = n => (n?.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 700);
+          return JSON.stringify({text:norm(e), nearby:norm(row),
+            pressed:e.getAttribute('aria-pressed'), expanded:e.getAttribute('aria-expanded'),
+            selected:e.getAttribute('aria-selected'), checked:e.getAttribute('aria-checked'),
+            disabled:e.disabled, cls:typeof e.className === 'string' ? e.className : '',
+            value:e.value ?? '', href:e.href || '', url:location.href});
+        }""")
 
     def _resolve(self, page, role: str, name: str):
         """get_by_role chain with graceful fallbacks (deterministic, no LLM)."""
@@ -243,14 +279,18 @@ class Tester:
                 "async() => await axe.run(document, {resultTypes:['violations']})")
             out = []
             for v in res.get("violations", []):
-                for node in v.get("nodes", [])[:3]:
+                for node in v.get("nodes", []):
                     tgt = (node.get("target") or ["?"])[0]
                     out.append({"id": v.get("id", "?"),
                                 "impact": v.get("impact", "minor"),
                                 "target": tgt[:90],
-                                "help": (v.get("help") or "")[:160]})
+                                "help": (v.get("help") or "")[:160],
+                                "description": (v.get("description") or "")[:240],
+                                "failure_summary": (node.get("failureSummary") or "")[:500],
+                                "html": (node.get("html") or "")[:300],
+                                "impact": v.get("impact", "minor")})
             out.extend(self._placeholder_audit(page))
-            return out[:10]
+            return out
         except Exception:
             return []
 

@@ -28,6 +28,7 @@ class Sandbox:
         self.auth_state_path = artifacts / "auth_state.json"
         self.auth_state_path.parent.mkdir(parents=True, exist_ok=True)
         self._app_proc: subprocess.Popen | None = None
+        self.readonly_blocked_requests: list[dict] = []
 
     # ---- 1) optional local-app boot --------------------------------------
     def boot_local_app(self, folder: str, command: str, port: int) -> None:
@@ -86,13 +87,14 @@ class Sandbox:
         ctx.set_default_navigation_timeout(config.NAV_TIMEOUT_MS)
         patterns = (config.NAV_BLOCKED_EXPLORER if guard == "explorer"
                     else config.NAV_BLOCKED_TESTER)
-        self._attach_guard(ctx, patterns, read_only=(guard == "explorer"))
+        self._attach_guard(ctx, patterns, read_only=(guard in ("explorer", "probe")),
+                           blocked_log=(self.readonly_blocked_requests if guard == "probe" else None))
         if tracing:
             ctx.tracing.start(screenshots=True, snapshots=True, sources=True)
         return ctx
 
     def _attach_guard(self, ctx: BrowserContext, patterns,
-                      read_only: bool = False) -> None:
+                      read_only: bool = False, blocked_log: list[dict] | None = None) -> None:
         """Block off-domain/destructive paths and keep exploration read-only."""
         allowed = self.base_host
 
@@ -102,6 +104,8 @@ class Sandbox:
             if host and host != allowed and not url.startswith("data:"):
                 return route.abort()
             if read_only and route.request.method.upper() not in ("GET", "HEAD", "OPTIONS"):
+                if blocked_log is not None:
+                    blocked_log.append({"method": route.request.method, "url": url})
                 return route.abort()
             low = url.lower()
             if any(p in low for p in patterns):
