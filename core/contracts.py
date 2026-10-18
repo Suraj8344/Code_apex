@@ -26,6 +26,7 @@ class AppState(BaseModel):
     url: str                         # representative concrete URL
     state_hash: str
     http_status: int = 200
+    access_blocked_reason: str = ""
     elements: list[StateElement] = Field(default_factory=list)
 
 
@@ -140,6 +141,7 @@ class RunResult(BaseModel):
     description: str
     project_id: str = ""
     status: str = "running"
+    access_blocked_reason: str = ""
     llm_mode: str = "heuristic"
     tokens_used: int = 0
     states_found: int = 0

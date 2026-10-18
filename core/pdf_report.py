@@ -77,10 +77,17 @@ def create_pdf_report(result, output: Path) -> Path:
                       _paragraph(f"The expedition ended before the normal pipeline completed. Error: {result.error}", styles["BodySmall"])])
         if not result.states_found and not result.tests_planned and not result.steps_executed:
             story.append(_paragraph("No application behavior was tested. Zero bug findings in this run are inconclusive and must not be interpreted as a clean bill of health.", styles["BodySmall"]))
+    if result.access_blocked_reason:
+        story.extend([Paragraph("Access blocked — result inconclusive", styles["Section"]),
+                      _paragraph(result.access_blocked_reason, styles["BodySmall"]),
+                      _paragraph("No bug findings are reported because the browser did not reach the target application. Resolve the access challenge or use an authorized staging environment, then run QArena again.", styles["BodySmall"])])
 
     story.append(Paragraph("Confirmed findings", styles["Section"]))
     if not result.filed_bugs:
-        story.append(_paragraph("No bugs were confirmed during this expedition. This reflects only the pages and journeys reached in this run.", styles["BodySmall"]))
+        if result.access_blocked_reason:
+            story.append(_paragraph("No application bugs could be confirmed because access was blocked. This result is not evidence that the site is bug-free.", styles["BodySmall"]))
+        else:
+            story.append(_paragraph("No bugs were confirmed during this expedition. This reflects only the pages and journeys reached in this run.", styles["BodySmall"]))
     for bug in result.filed_bugs:
         parts = [Paragraph(escape(f"{bug.bug_id}: {bug.title}"), styles["BugTitle"]),
                  _paragraph(f"Severity: {bug.severity}  |  Reproduced: {bug.reproduced_count}  |  Route: {bug.route or 'N/A'}", styles["Subtle"]),

@@ -193,6 +193,14 @@ class Orchestrator:
             emit({"type": "map", "states": res.states_found,
                   "seconds": round(time.time() - t0, 1)})
 
+            blocked_state = next((state for state in appmap.states
+                                  if state.access_blocked_reason), None)
+            if blocked_state:
+                res.status = "blocked"
+                res.access_blocked_reason = blocked_state.access_blocked_reason
+                emit({"type": "log", "msg": "Access blocked: stopping before planning tests or filing bugs."})
+                return
+
             # ------------------------------- STAGE 4: planning + guardrails
             stage(4, "Planner — journeys & adversarial cases")
             planner = Planner(appmap, llm)

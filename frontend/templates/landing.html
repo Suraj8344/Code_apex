@@ -18,7 +18,7 @@
     fresh, clean browsers</strong>. Everything else gets dropped.</p>
     <p class="cta-row">
       <a class="btn-ink big" href="/expedition">Send it hunting →</a>
-      <a class="btn-ghost" href="/runs/cli1791734448">Open a real report</a>
+      <a class="btn-ghost" href="/expedition">Run your own project →</a>
     </p>
     <p class="micro">works key-free · ≤4 LLM calls if you add one · every claim re-runnable</p>
   </div>
@@ -26,13 +26,13 @@
   <!-- live micro-demo: a hunt, playing itself -->
   <div class="demo" aria-label="simulated live hunt">
     <div class="demo-top"><span class="dot r"></span><span class="dot a"></span><span class="dot g"></span>
-      <span class="demo-title mono">qarena — live expedition</span></div>
+      <span class="demo-title mono">qarena — illustrative expedition</span></div>
     <ul id="demo-log" class="demo-log mono"></ul>
     <div id="demo-spec" class="demo-spec" hidden>
       <span class="pin"></span>
       <p class="ds-id mono">QA-09 · MAJOR</p>
-      <p class="ds-title">Total went below zero<br><span class="mono dim">cart accepted qty −5 → −$62</span></p>
-      <p class="ds-proof mono">✔ 3/3 replays · screenshot + trace attached</p>
+      <p class="ds-title">A linked page fails to load<br><span class="mono dim">observed link → HTTP 404</span></p>
+      <p class="ds-proof mono">✔ repeated in clean sessions · screenshot + trace</p>
     </div>
   </div>
 </section>
@@ -101,12 +101,11 @@
 <!-- ============================ REAL OUTPUT ============================ -->
 <section id="proof" class="proof">
   <div class="l-shot card">
-    <h2 class="card-title">Actual output — nothing staged</h2>
-    <p class="micro">Run #cli1791734448, a full hunt against our own straw-man store.
-    Screenshot, numbers and every bug card below it generated hands-free.</p>
-    <a href="/runs/cli1791734448"><img src="/static/img/qa_results_demo.png" alt="QArena completed run with benchmark 1.0 F1 and specimen cards"></a>
+    <h2 class="card-title">Example output preview</h2>
+    <p class="micro">Example report preview from a previous QArena run. Run data is stored with its server, so this preview stays available even when the original run has expired.</p>
+    <img src="/static/img/qa_results_demo.png" alt="Example QArena report showing a completed run, benchmark and specimen cards">
     <p class="cta-row" style="margin-top:16px">
-      <a class="btn-ghost" href="/runs/cli1791734448">Walk through this run live →</a>
+      <a class="btn-ghost" href="/expedition">Start a new expedition →</a>
     </p>
   </div>
 </section>
@@ -179,19 +178,19 @@
 /* ------- live micro-demo: a hunt that plays itself ------- */
 (function () {
   const lines = [
-    ["cmd", "$ qarena expedition https://myshop.app"],
-    ["dim", "▸ target reachable — mapping territory…"],
-    ["",   "  24 pages found · 1,168 controls"],
-    ["dim", "▸ planning journeys… 15 routes picked, 4 ungrounded ideas rejected"],
-    ["ok",  "✓ TC_02  login flow — behaved"],
-    ["ok",  "✓ TC_06  cart → checkout — behaved"],
-    ["ok",  "✓ TC_09  search 'quantum mug' — behaved"],
-    ["bug", "⚑ TC_05  quantity −5 → total shows −$62  …suspect"],
+    ["cmd", "$ qarena expedition https://example.edu"],
+    ["dim", "▸ reachable — mapping links and visible controls…"],
+    ["",   "  routes discovered from links · controls recorded"],
+    ["dim", "▸ planning journeys from the observed app map…"],
+    ["ok",  "✓ observed page loaded without server errors"],
+    ["ok",  "✓ safe content control revealed another view"],
+    ["dim", "✓ guessed routes excluded from the test plan"],
+    ["bug", "⚑ observed in-app link leads to HTTP 404 …suspect"],
     ["dim", "  replay 1/3 — happened again"],
     ["dim", "  replay 2/3 — happened again"],
     ["dim", "  replay 3/3 — happened again"],
-    ["bug", "■ PROVEN — filing report with screenshot + trace"],
-    ["ok",  "✓ suite exported · 7 green tests · F1 1.00"],
+    ["bug", "■ repeated — evidence attached to finding"],
+    ["ok",  "✓ evidence pack ready · route and replay details"],
   ];
   const log = document.getElementById("demo-log");
   const spec = document.getElementById("demo-spec");

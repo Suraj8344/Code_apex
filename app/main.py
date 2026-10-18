@@ -133,7 +133,7 @@ def load_handle(run_id: str):
         return h
     shared = coordination.get_run(run_id)
     if shared:
-        if shared["result"] and shared["status"] in {"done", "error"}:
+        if shared["result"] and shared["status"] in {"done", "error", "blocked"}:
             from core.orchestrator import RunHandle
             from core.contracts import RunResult
             h = RunHandle(run_id=run_id)
@@ -194,7 +194,11 @@ async def expedition_form(request: Request):
 async def run_page(request: Request, run_id: str):
     h = load_handle(run_id)
     if not h:
-        raise HTTPException(404, "unknown run")
+        return templates.TemplateResponse(request, "run_unavailable.html", {
+            "run_id": run_id,
+            "message": "This run ID is not available on this server. It may be an example link from an older deployment, or its saved run data may have been removed. Start a new expedition to create a fresh report.",
+            "events": [],
+        }, status_code=404)
     if isinstance(h, dict) and h["status"] == "unavailable":
         return templates.TemplateResponse(request, "run_unavailable.html", h)
     return templates.TemplateResponse(request, "run.html", {
@@ -325,6 +329,9 @@ async def api_role_report(run_id: str, role: str):
     if isinstance(handle, dict):
         raise HTTPException(409 if handle.get("status") != "unavailable" else 410,
                             handle.get("message", "Report is not ready until the run finishes"))
+    if handle and handle.result and handle.result.status == "blocked":
+        raise HTTPException(409, handle.result.access_blocked_reason or
+                            "The target blocked browser access; this run cannot provide a bug report.")
     if not handle or not handle.result:
         if isinstance(handle, dict) and handle.get("status") != "unavailable":
             return {"run_id": run_id, "status": handle["status"],
@@ -333,7 +340,10 @@ async def api_role_report(run_id: str, role: str):
                     "coverage": {}, "benchmark": {}}
         raise HTTPException(404, "unknown run")
     result = handle.result.model_dump()
-    bugs = [b.model_dump() for b in result.get("filed_bugs", [])]
+    # RunResult.model_dump() already converts nested FiledBug instances into
+    # dictionaries. Calling model_dump() again raises AttributeError and made
+    # both the role-view API and report download return HTTP 500.
+    bugs = result.get("filed_bugs", [])
     if role != "all":
         bugs = [b for b in bugs if role in bug_roles(b)]
     from core.recommendations import advise
@@ -415,7 +425,7 @@ async def api_events(request: Request, run_id: str):
                     if event.get("type") == "done":
                         return
                 current = coordination.get_run(run_id)
-                if current and current["status"] in {"done", "error"}:
+                if current and current["status"] in {"done", "error", "blocked"}:
                     if current["status"] == "error" and not current["result"]:
                         yield f"data: {json.dumps({'type':'error','msg':'Browser worker job failed before QArena could save a result'})}\n\n"
                         yield f"data: {json.dumps({'type':'done','status':'error','result':{'status':'error','error':'Browser worker job failed'}})}\n\n"

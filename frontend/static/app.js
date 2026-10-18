@@ -156,8 +156,10 @@
       li.classList.add("done");
     });
     const pill = $("status-pill");
-    pill.textContent = (result && result.status === "error") ? "STOPPED EARLY" : "COMPLETE";
-    pill.className = "pill mono " + (result && result.status === "error" ? "error" : "done");
+    const blocked = result && result.status === "blocked";
+    const failed = result && result.status === "error";
+    pill.textContent = blocked ? "ACCESS BLOCKED" : failed ? "STOPPED EARLY" : "COMPLETE";
+    pill.className = "pill mono " + (blocked || failed ? "error" : "done");
     $("zip-btn").hidden = false;
     $("pdf-btn").hidden = false;
     $("findings").hidden = false;
@@ -221,6 +223,9 @@
     const hadNoTestCoverage = !res.states_found && !res.tests_planned && !res.steps_executed;
     $("specimens").innerHTML = bugs.length
       ? bugs.map(specCard).join("")
+      : res.access_blocked_reason
+        ? `<div class="card error-card"><h3>Access blocked — result inconclusive</h3>
+           <p class="explain">${esc(res.access_blocked_reason)} No bugs were filed because QArena did not reach the application.</p></div>`
       : res.status === "error" || hadNoTestCoverage
         ? `<div class="card error-card"><h3>Bug status unknown</h3>
            <p class="explain">QArena did not complete enough testing to determine whether this website has bugs. Zero confirmed bugs here does not mean the website is bug-free. Resolve the run error and try again.</p></div>`
@@ -245,17 +250,33 @@
   const roleLoad = $("role-load");
   const roleDownload = $("role-download");
   const reportRole = $("report-role");
+  const roleStatus = $("role-status");
   if (reportRole && roleDownload) reportRole.addEventListener("change", () => {
     roleDownload.href = `/api/runs/${runId}/report/${reportRole.value}/download`;
+    if (roleStatus) roleStatus.textContent = "";
   });
   if (roleLoad) roleLoad.addEventListener("click", async () => {
     const role = $("report-role").value;
-    const response = await fetch(`/api/runs/${runId}/report/${role}`);
-    if (!response.ok) return;
-    const view = await response.json();
-    if (!fullResult) fullResult = await fetch(`/api/runs/${runId}/result`).then((r) => r.json());
-    renderFindings({...fullResult, filed_bugs: view.bugs});
-    $("specimens").scrollIntoView({behavior: "smooth", block: "start"});
+    roleLoad.disabled = true;
+    if (roleStatus) roleStatus.textContent = "Loading report view…";
+    try {
+      const response = await fetch(`/api/runs/${runId}/report/${role}`);
+      const view = await response.json();
+      if (!response.ok) throw new Error(view.detail || "The report view could not be loaded.");
+      if (!fullResult) {
+        const fullResponse = await fetch(`/api/runs/${runId}/result`);
+        const latest = await fullResponse.json();
+        if (!fullResponse.ok) throw new Error(latest.detail || "The run result could not be loaded.");
+        fullResult = latest;
+      }
+      renderFindings({...fullResult, filed_bugs: view.bugs});
+      if (roleStatus) roleStatus.textContent = `${view.role_name}: showing ${view.bugs.length} finding${view.bugs.length === 1 ? "" : "s"}.`;
+      $("specimens").scrollIntoView({behavior: "smooth", block: "start"});
+    } catch (error) {
+      if (roleStatus) roleStatus.textContent = error.message || "The report view could not be loaded.";
+    } finally {
+      roleLoad.disabled = false;
+    }
   });
   const shareBtn = $("share-report");
   if (shareBtn) shareBtn.addEventListener("click", async () => {
@@ -337,13 +358,9 @@
     if (ev.type === "snapshot") {
       if (state.done) { es.close(); return; }   // EventSource auto-reconnects
       ev.history.forEach(handle);               // — replay must stay idempotent
-      if (ev.result && ev.result.status === "done") {
+      if (ev.result && ["done", "error", "blocked"].includes(ev.result.status)) {
         onDone(ev.result);
         es.close();                             // a finished run never streams again
-      }
-      if (ev.result && ev.result.status === "error") {
-        onDone(ev.result);
-        es.close();
       }
       return;
     }

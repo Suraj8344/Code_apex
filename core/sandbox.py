@@ -86,19 +86,22 @@ class Sandbox:
         ctx.set_default_navigation_timeout(config.NAV_TIMEOUT_MS)
         patterns = (config.NAV_BLOCKED_EXPLORER if guard == "explorer"
                     else config.NAV_BLOCKED_TESTER)
-        self._attach_guard(ctx, patterns)
+        self._attach_guard(ctx, patterns, read_only=(guard == "explorer"))
         if tracing:
             ctx.tracing.start(screenshots=True, snapshots=True, sources=True)
         return ctx
 
-    def _attach_guard(self, ctx: BrowserContext, patterns) -> None:
-        """[Playwright route] block external domains + profile-blocked paths."""
+    def _attach_guard(self, ctx: BrowserContext, patterns,
+                      read_only: bool = False) -> None:
+        """Block off-domain/destructive paths and keep exploration read-only."""
         allowed = self.base_host
 
         def guard(route):
             url = route.request.url
             host = urlparse(url).netloc
             if host and host != allowed and not url.startswith("data:"):
+                return route.abort()
+            if read_only and route.request.method.upper() not in ("GET", "HEAD", "OPTIONS"):
                 return route.abort()
             low = url.lower()
             if any(p in low for p in patterns):

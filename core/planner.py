@@ -1,321 +1,269 @@
 """
-Stage 4 — Planner Agent: test case synthesis & guardrails.
-[LLM #1: LiteLLM + Pydantic] when a key is configured; otherwise the
-deterministic journey-grammar generator (works key-free).
-[Python Check vs AppMap] REJECT INVENTED STEPS  |  [Python Priority Score]
+Stage 4 — evidence-grounded test planning.
+
+The planner uses the observed AppMap and the user's stated requirements. It
+must not infer that an application is a store, forum, LMS, or any other product
+category from generic QA templates.
 """
 from __future__ import annotations
 
+import json
 import re
+from urllib.parse import urlsplit
 
 from . import config
 from .contracts import AppMap, ExpectedContract, StepSpec, TestCase
 from .llm import LLMPolicy
-
-DESCRIPTION_WORDS = ("sign up", "signup", "log in", "login", "search", "cart",
-                     "promo", "coupon", "checkout", "order", "pay")
+from .safety import is_safe_exploration_button
 
 
 class Planner:
     def __init__(self, appmap: AppMap, llm: LLMPolicy) -> None:
         self.map = appmap
         self.llm = llm
-        self.element_index = self._index_elements()
-        self.products = [n for n in appmap.catalog_prices.keys()
-                         if len(n) > 2][:8] or ["Quantum Mug"]
-
-    # ------------------------------------------------------- element index
-    def _index_elements(self) -> dict[str, set[str]]:
-        idx: dict[str, set[str]] = {}
-        for s in self.map.states:
-            for e in s.elements:
-                idx.setdefault(e.role, set()).add(self._norm(e.name))
-        return idx
 
     @staticmethod
-    def _norm(s: str) -> str:
-        return re.sub(r"\s+", " ", s.strip().lower())
+    def _norm(value: str) -> str:
+        return re.sub(r"\s+", " ", value.strip().lower())
 
-    def has(self, role: str, name_frag: str) -> bool:
-        if role == "route":
-            return any(self._norm(name_frag) in self._norm(s.route)
-                       for s in self.map.states)
-        frag = self._norm(name_frag)
-        return any(frag in n for n in self.element_index.get(role, set()))
+    @staticmethod
+    def _route_key(route: str) -> str:
+        path = urlsplit(route).path or "/"
+        return re.sub(r"/\d+(?=/|$)", "/*", path).rstrip("/") or "/"
 
-    def route_of(self, frag: str, default: str) -> str:
-        f = self._norm(frag)
-        for s in self.map.states:
-            if self._norm(f) in self._norm(s.route) and s.http_status == 200:
-                return s.route.replace("/*", "/1")
-        return default
+    @staticmethod
+    def _target_for_state(state) -> str:
+        parsed = urlsplit(state.url)
+        return parsed.path + (("?" + parsed.query) if parsed.query else "") or "/"
 
-    # ---------------------------------------------------------------- main
+    def _states_for_route(self, route: str):
+        route_norm = self._route_key(route)
+        return [state for state in self.map.states
+                if self._route_key(state.route) == route_norm]
+
+    def _observed_element(self, route: str, role: str, name: str) -> bool:
+        wanted = self._norm(name)
+        return any(element.role == role and self._norm(element.name) == wanted
+                   for state in self._states_for_route(route)
+                   for element in state.elements)
+
     def plan(self) -> tuple[list[TestCase], list[dict]]:
-        cases = self.llm_plan() if self.llm.available else []
-        if not cases:
-            cases = self.grammar_plan()
+        cases = self.grammar_plan()
+        if self.llm.available:
+            cases.extend(self.llm_plan())
         valid, rejected = self.reject_invented(cases)
-        for tc in valid:
-            tc.priority_score = self.priority(tc)
-        valid.sort(key=lambda t: t.priority_score, reverse=True)
-        return valid[: config.MAX_TESTS], rejected
+        valid, unsupported = self.reject_unsupported_expectations(valid)
+        rejected.extend(unsupported)
+        # Keep one test per title/route to avoid the model duplicating the
+        # deterministic, evidence-based navigation checks.
+        unique: list[TestCase] = []
+        seen: set[tuple[str, tuple[str, ...]]] = set()
+        for case in valid:
+            key = (self._norm(case.title), tuple(step.target for step in case.steps
+                                                  if step.action == "goto"))
+            if key in seen:
+                continue
+            seen.add(key)
+            case.priority_score = self.priority(case)
+            unique.append(case)
+        unique.sort(key=lambda item: item.priority_score, reverse=True)
+        return unique[:config.MAX_TESTS], rejected
 
-    # ------------------------------------------------- LLM #1 (optional)
     def llm_plan(self) -> list[TestCase]:
-        states = [{"route": s.route, "status": s.http_status,
-                   "elements": [{"role": e.role, "name": e.name}
-                                for e in s.elements[:22]]}
-                   for s in self.map.states]
+        states = [{"route": state.route, "status": state.http_status,
+                   "elements": [{"role": element.role, "name": element.name,
+                                 "required": element.required,
+                                 "enabled": element.enabled}
+                                for element in state.elements[:35]]}
+                  for state in self.map.states]
         system = (
-            "You are a senior QA engineer. Produce adversarial AND happy-path "
-            "browser test cases as strict JSON: {\"cases\":[{test_id, "
-            "journey_type, title, steps:[{step, action, target, role, name, "
-            "value}], expected:{success_url_contains, disallowed_url, "
-            "text_required, text_forbidden, should_reject, error_text, "
-            "badge_equals, money_non_negative}}]}. Rules: actions in "
-            "goto|click|dblclick|fill|press|select|check_text|assert_badge|wait. "
-            "goto target = route path. click/fill use role+name exactly as "
-            "listed. Cover boundary values (0, -1, 11), invalid emails, empty "
-            "required fields, double-clicks, empty-cart checkout, promo abuse.")
-        user = ("App description:\n" + self.map.description +
-                "\n\nAppMap JSON:\n" + __import__("json").dumps(states)[:9000])
+            "Act as a careful QA engineer testing only the application described "
+            "by the supplied AppMap and requirements. Return strict JSON with "
+            "{\"cases\":[{test_id,journey_type,title,steps,expected}]}. Each step "
+            "must use an allowed action: goto, click, dblclick, fill, press, "
+            "select, check_text, assert_badge, or wait. A goto route must be "
+            "successfully observed or linked from a successful page. Interactive "
+            "role/name pairs must exactly match controls on the current page. "
+            "Do not assume a product category or invent routes, controls, data, "
+            "expected messages, or business rules. Use the description as the "
+            "requirements oracle. Only assert behavior explicitly stated there or "
+            "directly demonstrated by the UI. Prefer safe, reversible journeys; "
+            "never submit payment, delete data, log out, create accounts, or send "
+            "messages. An unobserved route returning 404 is not a bug.")
+        user = ("Application requirements:\n" + self.map.description +
+                "\n\nObserved AppMap:\n" + json.dumps(
+                    {"states": states, "links": self.map.edges}, ensure_ascii=False)[:12000])
         data = self.llm.call_json("planner#1", system, user)
-        if not data or "cases" not in data:
+        if not data or not isinstance(data.get("cases"), list):
             return []
-        out: list[TestCase] = []
-        try:
-            for raw in data["cases"]:
-                raw["steps"] = [StepSpec(**{k: v for k, v in st.items()
-                                            if k in StepSpec.model_fields})
-                                for st in raw.get("steps", [])]
+        cases: list[TestCase] = []
+        for raw in data["cases"]:
+            try:
+                raw["steps"] = [StepSpec(**{key: value for key, value in step.items()
+                                             if key in StepSpec.model_fields})
+                                for step in raw.get("steps", [])]
                 raw["expected"] = ExpectedContract(
-                    **{k: v for k, v in raw.get("expected", {}).items()
-                       if k in ExpectedContract.model_fields})
-                out.append(TestCase(**{k: v for k, v in raw.items()
-                                       if k in ("test_id", "journey_type",
-                                                "priority_score", "title",
-                                                "steps", "expected")}))
-        except Exception:
-            return []
-        return out
+                    **{key: value for key, value in raw.get("expected", {}).items()
+                       if key in ExpectedContract.model_fields})
+                cases.append(TestCase(**{key: value for key, value in raw.items()
+                                         if key in ("test_id", "journey_type",
+                                                    "priority_score", "title",
+                                                    "steps", "expected")}))
+                cases[-1].test_id = "AI_" + cases[-1].test_id.removeprefix("AI_")
+            except Exception:
+                continue
+        return cases
 
-    # ------------------------------------- deterministic journey grammar
     def grammar_plan(self) -> list[TestCase]:
-        T: list[TestCase] = []
-        uid = [0]
+        cases: list[TestCase] = []
+        next_id = 0
 
-        def nid() -> str:
-            uid[0] += 1
-            return f"TC_{uid[0]:03d}"
-
-        prod = self.products[0]
-
-        # --- auth journeys ---------------------------------------------------
-        if self.has("route", "signup"):
-            T.append(TestCase(
-                test_id=nid(), journey_type="happy_path", title="Sign up new account",
-                steps=[StepSpec(step=1, action="goto", target="/signup"),
-                       StepSpec(step=2, action="fill", role="textbox", name="Full name", value="Trial User"),
-                       StepSpec(step=3, action="fill", role="textbox", name="Email", value="trial@qarena.dev"),
-                       StepSpec(step=4, action="fill", role="textbox", name="Password", value="passw0rd!"),
-                       StepSpec(step=5, action="click", role="button", name="Create account")],
-                expected=ExpectedContract(text_required=["Add to Cart"])))
-            T.append(TestCase(
-                test_id=nid(), journey_type="edge_case_negative",
-                title="Sign-up rejects invalid email",
-                steps=[StepSpec(step=1, action="goto", target="/signup"),
-                       StepSpec(step=2, action="fill", role="textbox", name="Full name", value="Bad Mail"),
-                       StepSpec(step=3, action="fill", role="textbox", name="Email", value="not-an-email"),
-                       StepSpec(step=4, action="fill", role="textbox", name="Password", value="passw0rd!"),
-                       StepSpec(step=5, action="click", role="button", name="Create account")],
-                expected=ExpectedContract(should_reject=True, error_text="valid email",
-                                          disallowed_url="/")))
-        if self.has("route", "login"):
-            T.append(TestCase(
-                test_id=nid(), journey_type="happy_path", title="Log in with valid credentials",
-                steps=[StepSpec(step=1, action="goto", target="/login"),
-                       StepSpec(step=2, action="fill", role="textbox", name="Email", value="demo@cloudcart.dev"),
-                       StepSpec(step=3, action="fill", role="textbox", name="Password", value="demo12345"),
-                       StepSpec(step=4, action="click", role="button", name="Log in")],
-                expected=ExpectedContract(text_required=["Log out"])))
-
-        # --- search intent ---------------------------------------------------
-        if self.has("searchbox", ""):
-            T.append(TestCase(
-                test_id=nid(), journey_type="happy_path",
-                title=f"Search finds exact product name '{prod}'",
-                steps=[StepSpec(step=1, action="goto", target="/"),
-                       StepSpec(step=2, action="fill", role="searchbox", name="Search", value=prod),
-                       StepSpec(step=3, action="press", role="searchbox", name="Search", target="Enter")],
-                expected=ExpectedContract(text_required=[prod],
-                                          text_forbidden=["No products found"])))
-
-        # --- cart / promo / quantity adversarial -----------------------------
-        can_cart = self.has("button", "add to cart")
-        if can_cart:
-            T.append(TestCase(
-                test_id=nid(), journey_type="happy_path",
-                title=f"Add '{prod}' to cart — badge shows 1",
-                steps=[StepSpec(step=1, action="goto", target="/"),
-                       StepSpec(step=2, action="click", role="button", name="Add to Cart")],
-                expected=ExpectedContract(badge_equals=1)))
-            T.append(TestCase(
-                test_id=nid(), journey_type="adversarial",
-                title="Rapid double-click adds exactly one unit",
-                steps=[StepSpec(step=1, action="goto", target="/"),
-                       StepSpec(step=2, action="dblclick", role="button", name="Add to Cart")],
-                expected=ExpectedContract(badge_equals=1)))
-            T.append(TestCase(
-                test_id=nid(), journey_type="edge_case_negative",
-                title="Cart rejects negative quantity (-5)",
-                steps=[StepSpec(step=1, action="goto", target="/"),
-                       StepSpec(step=2, action="click", role="button", name="Add to Cart"),
-                       StepSpec(step=3, action="goto", target="/cart"),
-                       StepSpec(step=4, action="fill", role="spinbutton", name="Quantity", value="-5"),
-                       StepSpec(step=5, action="click", role="button", name="Update")],
-                expected=ExpectedContract(should_reject=True,
-                                          error_text="between 1 and 10",
-                                          money_non_negative=True)))
-            T.append(TestCase(
-                test_id=nid(), journey_type="adversarial",
-                title="Negative quantity must never produce a negative money total",
-                steps=[StepSpec(step=1, action="goto", target="/"),
-                       StepSpec(step=2, action="click", role="button", name="Add to Cart"),
-                       StepSpec(step=3, action="goto", target="/cart"),
-                       StepSpec(step=4, action="fill", role="spinbutton", name="Quantity", value="-5"),
-                       StepSpec(step=5, action="click", role="button", name="Update"),
-                       StepSpec(step=6, action="goto", target="/checkout"),
-                       StepSpec(step=7, action="fill", role="textbox", name="Full name", value="Neg Tester"),
-                       StepSpec(step=8, action="fill", role="textbox", name="Email", value="neg@qarena.dev"),
-                       StepSpec(step=9, action="fill", role="textbox", name="Street address", value="1 Bug Lane"),
-                       StepSpec(step=10, action="click", role="button", name="Pay Now")],
-                # NOT should_reject: on a correct app the -5 is rejected at
-                # Update and the remaining positive cart may legitimately be
-                # paid. The true invariant: money must never go negative.
-                expected=ExpectedContract(money_non_negative=True)))
-        # --- product detail page console probe -------------------------------
-        if self.has("route", "product"):
-            prod_route = self.route_of("product", "/product/1")
-            T.append(TestCase(
-                test_id=nid(), journey_type="happy_path",
-                title="Product page: Add to Cart with a clean console",
-                steps=[StepSpec(step=1, action="goto", target=prod_route),
-                       StepSpec(step=2, action="click", role="button", name="Add to Cart")],
-                expected=ExpectedContract(badge_equals=None)))
-
-        if self.has("textbox", "promo"):
-            T.append(TestCase(
-                test_id=nid(), journey_type="happy_path",
-                title="Promo SAVE10 applies a 10% discount",
-                steps=[StepSpec(step=1, action="goto", target="/"),
-                       StepSpec(step=2, action="click", role="button", name="Add to Cart"),
-                       StepSpec(step=3, action="goto", target="/cart"),
-                       StepSpec(step=4, action="fill", role="textbox", name="Promo code", value="SAVE10"),
-                       StepSpec(step=5, action="click", role="button", name="Apply")],
-                expected=ExpectedContract(text_required=["Promo"], no_new_errors_5xx=True)))
-            T.append(TestCase(
-                test_id=nid(), journey_type="edge_case_negative",
-                title="Unknown promo code fails gracefully",
-                steps=[StepSpec(step=1, action="goto", target="/"),
-                       StepSpec(step=2, action="click", role="button", name="Add to Cart"),
-                       StepSpec(step=3, action="goto", target="/cart"),
-                       StepSpec(step=4, action="fill", role="textbox", name="Promo code", value="XXX-NOPE"),
-                       StepSpec(step=5, action="click", role="button", name="Apply")],
-                expected=ExpectedContract(should_reject=True,
-                                          error_text="Invalid promo code")))
-
-        # --- checkout ---------------------------------------------------------
-        if self.has("route", "checkout"):
-            T.append(TestCase(
-                test_id=nid(), journey_type="edge_case_negative",
-                title="Checkout blocks empty cart",
-                steps=[StepSpec(step=1, action="goto", target="/checkout"),
-                       StepSpec(step=2, action="click", role="button", name="Pay Now")],
-                expected=ExpectedContract(should_reject=True,
-                                          disallowed_url="/order",
-                                          text_forbidden=["Order confirmed"],
-                                          error_text="cart is empty")))
-            T.append(TestCase(
-                test_id=nid(), journey_type="edge_case_negative",
-                title="Checkout requires shipping address",
-                steps=[StepSpec(step=1, action="goto", target="/"),
-                       StepSpec(step=2, action="click", role="button", name="Add to Cart"),
-                       StepSpec(step=3, action="goto", target="/checkout"),
-                       StepSpec(step=4, action="fill", role="textbox", name="Full name", value="No Addr"),
-                       StepSpec(step=5, action="fill", role="textbox", name="Email", value="noaddr@qarena.dev"),
-                       StepSpec(step=6, action="click", role="button", name="Pay Now")],
-                expected=ExpectedContract(should_reject=True, error_text="address is required",
-                                          text_forbidden=["Order confirmed"])))
-            T.append(TestCase(
-                test_id=nid(), journey_type="happy_path",
-                title=f"Full purchase journey: {prod}",
-                steps=[StepSpec(step=1, action="goto", target="/"),
-                       StepSpec(step=2, action="click", role="button", name="Add to Cart"),
-                       StepSpec(step=3, action="goto", target="/checkout"),
-                       StepSpec(step=4, action="fill", role="textbox", name="Full name", value="Happy Buyer"),
-                       StepSpec(step=5, action="fill", role="textbox", name="Email", value="happy@qarena.dev"),
-                       StepSpec(step=6, action="fill", role="textbox", name="Street address", value="42 Green Rd"),
-                       StepSpec(step=7, action="click", role="button", name="Pay Now")],
-                expected=ExpectedContract(success_url_contains="/order",
-                                          text_required=["Order confirmed"],
-                                          money_non_negative=True)))
-
-        # --- dead-link patrol from exploration facts ---------------------------
-        dead = [s for s in self.map.states if s.http_status >= 400]
-        for ds in dead[:2]:
-            link_name = ds.route.strip("/") or ds.route
-            # prefer a real link click when an accessible link exists in the
-            # element index — but icon-only/aria-less footers still deserve
-            # the patrol: navigate to the (proven dead) route directly
-            if self.has("link", link_name):
-                steps = [StepSpec(step=1, action="goto", target="/"),
-                         StepSpec(step=2, action="click", role="link",
-                                  name=link_name.title().replace("-", " "))]
-            else:
-                steps = [StepSpec(step=1, action="goto", target="/"),
-                         StepSpec(step=2, action="goto", target=ds.route)]
-            T.append(TestCase(
-                test_id=nid(), journey_type="happy_path",
-                title=f"{'Footer link' if steps[-1].action == 'click' else 'Route'} '{link_name}' serves a real page",
-                steps=steps,
+        def add(title: str, route: str, steps: list[StepSpec] | None = None,
+                kind: str = "happy_path") -> None:
+            nonlocal next_id
+            next_id += 1
+            cases.append(TestCase(
+                test_id=f"TC_{next_id:03d}", journey_type=kind, title=title,
+                steps=steps or [StepSpec(step=1, action="goto", target=route)],
                 expected=ExpectedContract(no_new_errors_5xx=True)))
-        return T
 
-    # --------------------------------------------- invented-step rejection
+        # Revisit pages discovered by crawling and capture fresh runtime
+        # evidence. A found route is not a business requirement; this check
+        # only confirms that the observed page still loads.
+        successful_states = []
+        seen_routes: set[str] = set()
+        for state in self.map.states:
+            route_key = self._route_key(state.route)
+            if state.http_status == 200 and route_key not in seen_routes:
+                successful_states.append(state)
+                seen_routes.add(route_key)
+        for state in successful_states:
+            target = self._target_for_state(state)
+            add(f"Observed page {state.route} loads without a server error", target)
+
+        # Search is exercised only when the UI actually exposes a searchbox.
+        for state in self.map.states:
+            search = next((element for element in state.elements
+                           if element.role == "searchbox" and element.enabled), None)
+            if search:
+                add(f"Observed search control on {state.route} accepts a query",
+                    self._target_for_state(state),
+                    [StepSpec(step=1, action="goto",
+                              target=self._target_for_state(state)),
+                     StepSpec(step=2, action="fill", role="searchbox",
+                              name=search.name, value="QArena search probe"),
+                     StepSpec(step=3, action="press", role="searchbox",
+                              name=search.name, target="Enter")])
+
+        # A dead route is actionable only if a successful page actually linked
+        # to it. Direct probes and guessed URLs never enter this list.
+        states_by_id = {state.state_id: state for state in self.map.states}
+        for edge in self.map.edges:
+            source = states_by_id.get(edge.get("from"))
+            match = re.fullmatch(r'button "(.*)"', edge.get("via", ""))
+            if (source and source.http_status == 200 and match
+                    and is_safe_exploration_button(match.group(1))):
+                label = match.group(1)
+                target = self._target_for_state(source)
+                add(f'Observed control "{label}" on {source.route} responds', target,
+                    [StepSpec(step=1, action="goto", target=target),
+                     StepSpec(step=2, action="click", role="button", name=label)])
+
+        linked_routes: set[str] = set()
+        for edge in self.map.edges:
+            source = states_by_id.get(edge.get("from"))
+            if source and source.http_status == 200:
+                linked_routes.add(self._route_key(edge.get("to", "")))
+        for state in self.map.states:
+            if state.http_status >= 400 and self._route_key(state.route) in linked_routes:
+                add(f"Observed site link leads to unavailable page {state.route}",
+                    self._target_for_state(state))
+        return cases
+
+    def reject_unsupported_expectations(
+            self, cases: list[TestCase]) -> tuple[list[TestCase], list[dict]]:
+        """Strip model assertions that cannot be tied to requirements or UI evidence."""
+        proof = self._norm(" ".join([self.map.description] + [
+            element.name for state in self.map.states for element in state.elements]))
+        kept: list[TestCase] = []
+        notes: list[dict] = []
+        for case in cases:
+            removed: list[str] = []
+            expected = case.expected
+            for field in ("text_required", "text_forbidden"):
+                values = getattr(expected, field)
+                grounded = [value for value in values if self._norm(value) in proof]
+                if len(grounded) != len(values):
+                    removed.extend(value for value in values if value not in grounded)
+                    setattr(expected, field, grounded)
+            if expected.error_text and self._norm(expected.error_text) not in proof:
+                removed.append(expected.error_text)
+                expected.error_text = ""
+            if expected.success_url_contains and not any(
+                    expected.success_url_contains.lower() in state.route.lower()
+                    for state in self.map.states if state.http_status == 200):
+                removed.append("success URL " + expected.success_url_contains)
+                expected.success_url_contains = ""
+            if expected.should_reject and not any(word in proof for word in (
+                    "reject", "invalid", "required", "validation", "must not", "cannot")):
+                removed.append("unsupported rejection expectation")
+                expected.should_reject = False
+            if expected.badge_equals is not None and not any(
+                    word in proof for word in ("badge", "cart", "item count")):
+                removed.append("unsupported badge assertion")
+                expected.badge_equals = None
+            if expected.money_non_negative and not any(
+                    word in proof for word in ("price", "money", "amount", "total", "cost")):
+                removed.append("unsupported money assertion")
+                expected.money_non_negative = False
+            if removed:
+                notes.append({"test_id": case.test_id, "title": case.title,
+                              "removed_unsupported_expectations": removed})
+            kept.append(case)
+        return kept, notes
+
     def reject_invented(self, cases: list[TestCase]) -> tuple[list[TestCase], list[dict]]:
-        valid, rejected = [], []
-        routes = {"/"} | {s.route for s in self.map.states}
-        for tc in cases:
-            ok, bad_steps = True, []
-            for st in tc.steps:
-                if st.action == "goto":
-                    pat = re.sub(r"/\d+(?=/|$)", "/*", st.target)
-                    if st.target not in routes and pat not in routes:
-                        ok = False
-                        bad_steps.append(f"goto {st.target}")
-                elif st.action in ("click", "fill", "select", "dblclick", "press"):
-                    if not self.has(st.role, st.name):
-                        ok = False
-                        bad_steps.append(f'{st.action} {st.role} "{st.name}"')
-            (valid if ok else rejected).append(
-                tc if ok else {"test_id": tc.test_id, "title": tc.title,
-                               "invented_steps": bad_steps})
+        valid: list[TestCase] = []
+        rejected: list[dict] = []
+        good_routes = {self._route_key(state.route) for state in self.map.states
+                       if state.http_status == 200}
+        linked_routes: set[str] = set()
+        states_by_id = {state.state_id: state for state in self.map.states}
+        for edge in self.map.edges:
+            source = states_by_id.get(edge.get("from"))
+            if source and source.http_status == 200:
+                linked_routes.add(self._route_key(edge.get("to", "")))
+        allowed_routes = good_routes | linked_routes | {"/"}
+
+        for case in cases:
+            route = "/"
+            invalid: list[str] = []
+            for step in case.steps:
+                if step.action == "goto":
+                    raw_target = step.target.strip()
+                    if not raw_target.startswith("/") or raw_target.startswith("//"):
+                        invalid.append(f"goto must be a same-site path: {step.target}")
+                        continue
+                    route = self._route_key(step.target)
+                    if route not in allowed_routes:
+                        invalid.append(f"unobserved route {step.target}")
+                elif step.action in ("click", "fill", "select", "dblclick", "press"):
+                    if not self._observed_element(route, step.role, step.name):
+                        invalid.append(f'{step.action} {step.role} "{step.name}" on {route}')
+            if invalid:
+                rejected.append({"test_id": case.test_id, "title": case.title,
+                                 "invented_steps": invalid})
+            else:
+                valid.append(case)
         return valid, rejected
 
-    # -------------------------------------------------------------- priority
     @staticmethod
-    def priority(tc: TestCase) -> int:
+    def priority(case: TestCase) -> int:
         score = 50
-        blob = (tc.title + " " + " ".join(s.target for s in tc.steps)).lower()
-        if tc.journey_type.startswith("edge"):
+        if case.journey_type.startswith("edge"):
             score += 15
-        if tc.journey_type == "adversarial":
-            score += 25
-        if "checkout" in blob or "pay now" in blob:
-            score += 30
-        if "login" in blob or "sign" in blob:
-            score += 10
-        if "promo" in blob:
-            score += 10
+        if case.journey_type == "adversarial":
+            score += 20
+        if "unavailable page" in case.title:
+            score += 20
         return min(score, 99)

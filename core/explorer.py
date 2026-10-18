@@ -4,9 +4,9 @@ Stage 3b — Explorer Agent: app discovery like a user, deterministic.
 [Python: URL pattern + SHA256] canonical state hash => zero infinite loops
 [networkx + pyvis] interactive App Map; [SQLite + JSON] persistence
 
-Exploration policy (demo-safety): the crawler only follows GET navigations —
-same-origin links and one safe search probe. Buttons/forms are RECORDED as
-elements (they become Planner test fodder) but never clicked during crawl.
+Exploration policy (demo-safety): the crawler follows observed same-origin
+links and records visible controls. It does not invent application routes or
+submit forms while mapping the target.
 """
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from urllib.parse import urljoin, urlparse
 from . import config
 from .contracts import AppMap, AppState, StateElement
 from .sandbox import Sandbox
+from .safety import is_safe_exploration_button
 
 SIG_ROLES = ("link", "button", "textbox", "searchbox", "spinbutton", "combobox",
              "checkbox", "radio", "img", "heading")
@@ -68,6 +69,8 @@ class Explorer:
         self._seen_hash: dict[str, str] = {}   # state_hash -> state_id
         self._visited_urls: set[str] = set()
         self._link_status: dict[str, int] = {}
+        self._probed_buttons: set[tuple[str, str]] = set()
+        self._safe_button_budget = 16
 
     # ---------------------------------------------------------------- main
     def explore(self, description: str) -> AppMap:
@@ -90,10 +93,16 @@ class Explorer:
             if url in self._visited_urls or not self._in_scope(url):
                 continue
             self._visited_urls.add(url)
-            state, links, has_search = self._visit(page, url)
+            state, links, _has_search = self._visit(page, url)
             actions += 1
             if state is None:
                 continue
+            if state.access_blocked_reason:
+                self.emit({"type": "log", "msg": state.access_blocked_reason})
+                # Challenge pages often link to documentation or challenge
+                # internals. Treating those as the target's territory creates
+                # misleading coverage and false-positive route findings.
+                break
             # enqueue discovered links (GET-only navigation)
             if depth < 3:
                 for href, lname in links:
@@ -103,22 +112,23 @@ class Explorer:
                         self.appmap.edges.append(
                             {"from": state.state_id, "to": canonical_route(nxt),
                              "via": f'link "{lname}"'})
-            # safe search probe discovers /search state
-            if has_search:
-                probe = self.sbx.target_url + "/search?q=" + config.SEARCH_PROBE
-                if self._in_scope(probe) and probe not in self._visited_urls:
-                    frontier.append((probe, depth + 1))
-                    self.appmap.edges.append(
-                        {"from": state.state_id, "to": "/search",
-                         "via": 'searchbox "Search"'})
+            # Expand only clearly navigational/reveal controls, in their own
+            # browser context. Form submitters and consequential actions are
+            # never clicked by the explorer.
+            for element in state.elements:
+                if (element.role == "button" and element.enabled
+                        and is_safe_exploration_button(element.name)
+                        and self._safe_button_budget > 0
+                        and (state.state_id, element.name) not in self._probed_buttons):
+                    self._probe_safe_button(state, element, frontier, depth)
+                    self._safe_button_budget -= 1
+                    self._probed_buttons.add((state.state_id, element.name))
         ctx.close()
-        self._populate_cart_probe()     # elements that only exist with cart items
-        self.sbx.seed_target()          # probe mutated the world — reset it
         self._persist()
         self._render_map()
         return self.appmap
 
-    # --------------------------------------------------- enrichment probes
+    # --------------------------------------------------- guest view probe
     def _guest_nav_links(self) -> list[str]:
         """Probe: open home WITHOUT the saved login — surfaces links that only
         guests see (/login, /signup). Deterministic, GET-only."""
@@ -137,23 +147,44 @@ class Explorer:
             pass
         return list(dict.fromkeys(out))
 
-    def _populate_cart_probe(self) -> None:
-        """Probe: add one item, then re-visit /cart and /checkout so their
-        elements (Quantity spinbutton, Promo code, Pay Now…) enter the AppMap.
-        Classic crawler enrichment — some states only exist after a mutation."""
+    def _probe_safe_button(self, source: AppState, element: StateElement,
+                           frontier: deque[tuple[str, int]], depth: int) -> None:
+        """Click an observed low-risk disclosure/navigation button once."""
+        ctx = None
         try:
-            ctx = self.sbx.new_context(with_auth=True)
+            ctx = self.sbx.new_context(with_auth=True, guard="explorer")
             page = ctx.new_page()
-            page.goto(self.sbx.target_url + "/", wait_until="domcontentloaded")
-            btn = page.get_by_role("button", name="Add to Cart")
-            if btn.count():
-                btn.first.click()
-                page.wait_for_timeout(600)
-            self._visit(page, self.sbx.target_url + "/cart")
-            self._visit(page, self.sbx.target_url + "/checkout")
-            ctx.close()
+            page.goto(source.url, wait_until="domcontentloaded")
+            button = page.get_by_role("button", name=element.name, exact=True)
+            if not button.count() or not button.first.is_visible():
+                return
+            # A button inside a form may submit even if its visible label looks
+            # harmless. Do not click form controls during discovery.
+            if button.first.evaluate(
+                    "el => !!el.closest('form') || el.getAttribute('type') === 'submit'"):
+                return
+            button.first.click(timeout=1800)
+            page.wait_for_timeout(250)
+            discovered, links, _has_search = self._visit(page, page.url)
+            destination = discovered.route if discovered else canonical_route(page.url)
+            edge = {"from": source.state_id, "to": destination,
+                    "via": f'button "{element.name}"'}
+            if edge not in self.appmap.edges:
+                self.appmap.edges.append(edge)
+            if discovered and not discovered.access_blocked_reason and depth < 3:
+                for href, label in links:
+                    nxt = urljoin(page.url, href).split("#")[0]
+                    if self._in_scope(nxt) and nxt not in self._visited_urls:
+                        self.appmap.edges.append(
+                            {"from": discovered.state_id,
+                             "to": canonical_route(nxt),
+                             "via": f'link "{label}"'})
+                        frontier.append((nxt, depth + 1))
         except Exception:
-            pass
+            return
+        finally:
+            if ctx:
+                ctx.close()
 
     # ------------------------------------------------------------- visit one
     def _visit(self, page, url: str):
@@ -164,6 +195,13 @@ class Explorer:
             return None, [], False
         self.sbx.dismiss_popups(page)
         status = resp.status if resp else 0
+        try:
+            title = page.title()
+            body_text = page.locator("body").inner_text(timeout=1500)[:12000]
+        except Exception:
+            title, body_text = "", ""
+        from .access import access_block_reason
+        blocked_reason = access_block_reason(status, title, body_text)
         try:
             snap = page.locator("body").aria_snapshot(timeout=2500)
         except Exception:
@@ -180,6 +218,7 @@ class Explorer:
         state = AppState(
             state_id=state_id, route=route,
             url=page.url, state_hash=shash, http_status=status,
+            access_blocked_reason=blocked_reason,
             elements=[StateElement(id=f"{state_id}e{i}", role=e["role"],
                                    name=e["name"])
                       for i, e in enumerate(elements)])
