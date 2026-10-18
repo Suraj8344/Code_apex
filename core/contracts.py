@@ -24,6 +24,8 @@ class AppState(BaseModel):
     state_id: str
     route: str                       # canonical route, e.g. /product/* or /search
     url: str                         # representative concrete URL
+    title: str = ""
+    summary: str = ""                # short visible-page context for grounded AI planning
     state_hash: str
     http_status: int = 200
     access_blocked_reason: str = ""

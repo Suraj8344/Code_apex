@@ -71,6 +71,14 @@ def create_pdf_report(result, output: Path) -> Path:
     ]))
     story.extend([table, Paragraph("Application overview", styles["Section"]),
                   _paragraph(result.description or "No application description provided.", styles["BodySmall"])])
+    if result.tokens_used == 0 and "heuristic" in result.llm_mode.lower():
+        story.append(_paragraph(
+            "AI was not enabled for this run because no provider API key was configured (or offline mode was selected). Zero tokens means no LLM requests were made; route discovery and browser checks ran with QArena's deterministic rules.",
+            styles["BodySmall"]))
+    elif result.tokens_used == 0:
+        story.append(_paragraph(
+            "The provider did not report token usage for this run; the displayed zero may reflect missing usage metadata.",
+            styles["BodySmall"]))
 
     if result.error:
         story.extend([Paragraph("Run status and limitations", styles["Section"]),

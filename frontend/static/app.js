@@ -180,7 +180,12 @@
 
   function renderFindings(res) {
     $("tokens").textContent = res.tokens_used || 0;
-    log(`expedition ${res.status === "error" ? "stopped early" : "complete"} — mode: ${res.llm_mode}`);
+    const aiMode = String(res.llm_mode || "heuristic (key-free)");
+    const aiWasOff = /heuristic|key-free|offline/i.test(aiMode);
+    log(aiWasOff
+      ? `AI was not enabled (${aiMode}); 0 tokens is expected. Add a provider API key to .env to enable AI-assisted link ranking and test planning.`
+      : `AI mode: ${aiMode}; provider-reported usage: ${res.tokens_used || 0} tokens.`);
+    log(`expedition ${res.status === "error" ? "stopped early" : "complete"}`);
 
     if (res.status === "error" && res.error) {
       $("error-card").hidden = false;

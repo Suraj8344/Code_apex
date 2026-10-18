@@ -32,10 +32,24 @@ class LLMPolicy:
         self.model = os.environ.get("QARENA_LLM_MODEL", config.LLM_MODEL_ENV_DEFAULT)
 
     @property
+    def has_provider_key(self) -> bool:
+        placeholders = {"your-key-here", "your_api_key", "changeme", "replace-me"}
+        return any((os.environ.get(k) or "").strip().lower() not in ("", *placeholders)
+                   for k in KEY_ENV_NAMES)
+
+    @property
     def available(self) -> bool:
         if os.environ.get("QARENA_OFFLINE", "").lower() in ("1", "true"):
             return False
-        return any(os.environ.get(k) for k in KEY_ENV_NAMES)
+        return self.has_provider_key
+
+    @property
+    def mode_label(self) -> str:
+        if self.available:
+            return "AI-assisted (LiteLLM)"
+        if os.environ.get("QARENA_OFFLINE", "").lower() in ("1", "true"):
+            return "heuristic (offline mode)"
+        return "heuristic (API key missing)"
 
     @property
     def total_tokens(self) -> int:

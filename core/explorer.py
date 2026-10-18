@@ -27,6 +27,13 @@ from .safety import is_safe_exploration_button
 SIG_ROLES = ("link", "button", "textbox", "searchbox", "spinbutton", "combobox",
              "checkbox", "radio", "img", "heading")
 PRICE_RE = re.compile(r"\$(\d{1,5})\.(\d{2})")
+NON_PAGE_SUFFIXES = {
+    ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif",
+    ".ico", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip",
+    ".rar", ".7z", ".mp3", ".mp4", ".webm", ".wav", ".css", ".js",
+    ".mjs", ".json", ".xml", ".csv", ".txt", ".woff", ".woff2", ".ttf",
+    ".eot", ".wasm", ".map",
+}
 VOLATILE_RE = re.compile(
     r"[0-9a-f]{8}-[0-9a-f-]{27,}|\b\d{10,}\b|CC-[0-9A-F]{8}"
     r"|\b\d{4}-\d{2}-\d{2}T[0-9:.Z+-]+\b", re.I)
@@ -60,10 +67,13 @@ def parse_aria_snapshot(snap: str) -> list[dict]:
 
 
 class Explorer:
-    def __init__(self, sandbox: Sandbox, run_dir: Path, emit=lambda e: None) -> None:
+    def __init__(self, sandbox: Sandbox, run_dir: Path, emit=lambda e: None,
+                 llm=None) -> None:
         self.sbx = sandbox
         self.run_dir = run_dir
         self.emit = emit
+        self.llm = llm
+        self._ai_rank_calls = 0
         self.graph = None       # networkx DiGraph
         self.appmap = AppMap(app_url=sandbox.target_url, description="")
         self._seen_hash: dict[str, str] = {}   # state_hash -> state_id
@@ -104,11 +114,14 @@ class Explorer:
                 # misleading coverage and false-positive route findings.
                 break
             # enqueue discovered links (GET-only navigation)
-            if depth < 3:
-                for href, lname in links:
+            if depth < 4:
+                ordered_links = self._prioritize_links(state, links)
+                # Follow the most promising observed navigation path first,
+                # like a user exploring one section before returning to menus.
+                for href, lname in reversed(ordered_links):
                     nxt = urljoin(url, href)
                     if self._in_scope(nxt) and nxt not in self._visited_urls:
-                        frontier.append((nxt.split("#")[0], depth + 1))
+                        frontier.appendleft((nxt.split("#")[0], depth + 1))
                         self.appmap.edges.append(
                             {"from": state.state_id, "to": canonical_route(nxt),
                              "via": f'link "{lname}"'})
@@ -127,6 +140,29 @@ class Explorer:
         self._persist()
         self._render_map()
         return self.appmap
+
+    def _prioritize_links(self, state: AppState,
+                          links: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        """Use the LLM only to rank actual visible links; never to invent URLs."""
+        if not self.llm or not self.llm.available or self._ai_rank_calls >= 4 or len(links) < 2:
+            return links
+        self._ai_rank_calls += 1
+        candidates = [{"index": i, "label": label[:100], "path": urlparse(urljoin(state.url, href)).path[:180]}
+                      for i, (href, label) in enumerate(links[:60])]
+        response = self.llm.call_json(
+            f"explorer-rank#{self._ai_rank_calls}",
+            'You assist a safe website QA explorer. Rank only the supplied visible same-site links by likely value to a real user following the supplied task. Prefer primary navigation, key service/workflow pages, and useful search/help pages. Deprioritize privacy, legal, policy, login, and low-value pages. Return JSON {"order":[integer indices]} with indices copied from candidates; never invent links.',
+            json.dumps({"task": self.appmap.description, "current_path": state.route,
+                        "visible_page_context": state.summary[:1100],
+                        "visible_links": candidates}, ensure_ascii=False)[:8000])
+        if not response or not isinstance(response.get("order"), list):
+            return links
+        order: list[int] = []
+        for index in response["order"]:
+            if isinstance(index, int) and 0 <= index < min(len(links), 60) and index not in order:
+                order.append(index)
+        order.extend(i for i in range(len(links)) if i not in order)
+        return [links[i] for i in order]
 
     # --------------------------------------------------- guest view probe
     def _guest_nav_links(self) -> list[str]:
@@ -193,6 +229,14 @@ class Explorer:
             page.wait_for_timeout(350)
         except Exception:
             return None, [], False
+        # A same-origin link can point to a PDF, image, or other download.
+        # Those are evidence/assets, not application pages or user journeys.
+        content_type = (resp.headers.get("content-type", "").split(";", 1)[0].lower()
+                        if resp else "")
+        if content_type and content_type not in ("text/html", "application/xhtml+xml"):
+            return None, [], False
+        if not content_type and self._non_page_url(page.url):
+            return None, [], False
         self.sbx.dismiss_popups(page)
         status = resp.status if resp else 0
         try:
@@ -217,7 +261,11 @@ class Explorer:
 
         state = AppState(
             state_id=state_id, route=route,
-            url=page.url, state_hash=shash, http_status=status,
+            url=page.url, title=title[:200],
+            summary=" ".join([title] + [e["name"] for e in elements
+                                       if e["role"] == "heading"] +
+                              [re.sub(r"\s+", " ", body_text)[:700]])[:1100],
+            state_hash=shash, http_status=status,
             access_blocked_reason=blocked_reason,
             elements=[StateElement(id=f"{state_id}e{i}", role=e["role"],
                                    name=e["name"])
@@ -246,10 +294,18 @@ class Explorer:
             if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
                 continue
             low = href.lower()
+            absolute = urljoin(page.url, href)
+            if not self._in_scope(absolute) or self._non_page_url(absolute):
+                continue
             if any(p in low for p in config.NAV_BLOCKED_PATTERNS):
                 continue
             out.append((href, name or urlparse(href).path or href))
         return out
+
+    @staticmethod
+    def _non_page_url(url: str) -> bool:
+        path = urlparse(url).path.lower()
+        return Path(path).suffix in NON_PAGE_SUFFIXES
 
     def _harvest_prices(self, page) -> None:
         """Catalog price ledger (first observation wins) — the deterministic

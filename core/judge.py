@@ -40,6 +40,10 @@ class Judge:
 
         # ---- S2 groups per failing URL (+ attribute S1/S3 sharing the URL) --
         for f in ev.http_failures:
+            # Static asset blocks (often CDN/WAF/browser policy responses) are
+            # useful trace context, but do not prove a broken user journey.
+            if f.get("resource_type") not in (None, "document", "xhr", "fetch"):
+                continue
             path = urlparse(f["url"]).path or f["url"]
             key = f"http:{path}"
             add(key, _hit(2, f"{f['method']} {f['url']} → {f['status']}"))
@@ -56,8 +60,12 @@ class Judge:
         attributed = {i for i, c in enumerate(ev.console_errors)
                       for f in ev.http_failures
                       if urlparse(f["url"]).path.split("/")[-1] in c}
+        failed_script_assets = any(
+            f.get("resource_type") == "script" for f in ev.http_failures)
         for i, ce in enumerate(ev.console_errors):
             if i not in attributed:
+                if failed_script_assets and "unexpected token '<'" in ce.lower():
+                    continue
                 hit = _hit(1, ce)
                 if ce.startswith("[uncaught]"):
                     # pageerror: a real runtime exception, not load noise —

@@ -71,6 +71,7 @@ class Planner:
 
     def llm_plan(self) -> list[TestCase]:
         states = [{"route": state.route, "status": state.http_status,
+                   "title": state.title, "visible_summary": state.summary[:800],
                    "elements": [{"role": element.role, "name": element.name,
                                  "required": element.required,
                                  "enabled": element.enabled}

@@ -208,7 +208,19 @@ class Reporter:
 
     @staticmethod
     def _expect_actual(pb: PossibleBug) -> tuple[str, str]:
-        expected = ("The app follows its stated description: valid inputs are "
-                    "accepted, invalid inputs are rejected with a clear message, "
-                    "money values stay correct, and pages load without errors.")
-        return expected, f"{pb.summary} — observed during journey: {pb.journey}"
+        signals = {hit.signal for hit in pb.signals}
+        if 5 in signals and pb.evidence.axe_violations:
+            violation = pb.evidence.axe_violations[0]
+            expected = f"{violation.get('help') or 'The element should meet the applicable accessibility requirement.'}"
+        elif 4 in signals:
+            expected = "The observed form action should follow the stated application requirements."
+        elif 2 in signals:
+            expected = "A first-party document or API request required by this observed journey should complete successfully."
+        elif 3 in signals:
+            expected = "Visible images and links used by this page should load or lead to available content."
+        elif 1 in signals:
+            expected = "The page should not raise an uncaught JavaScript runtime error during this journey."
+        else:
+            expected = "The observed behavior should match the requirements and controls on this page."
+        actual = f"{pb.summary} — observed during journey: {pb.journey}"
+        return expected, actual

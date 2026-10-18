@@ -44,6 +44,11 @@ class Tester:
         def _console(m):
             if m.type != "error":
                 return
+            # Browser reports these for failed images/scripts/stylesheets too;
+            # those requests are classified separately and are not by
+            # themselves evidence that a user workflow is broken.
+            if m.text.startswith("Failed to load resource:"):
+                return
             try:
                 loc = (m.location or {})
                 path = " {" + (loc.get("url") or "").replace(self.sbx.target_url, "") + "}" \
@@ -55,7 +60,8 @@ class Tester:
         page.on("console", _console)
         page.on("pageerror", lambda e: console_errors.append("[uncaught] " + str(e)))
         page.on("response", lambda r: http_failures.append(
-            {"method": r.request.method, "url": r.url, "status": r.status})
+            {"method": r.request.method, "url": r.url, "status": r.status,
+             "resource_type": r.request.resource_type})
             if r.status >= 400 and self.sbx.base_host in r.url else None)
 
         verdict = "passed"

@@ -156,7 +156,7 @@ class Orchestrator:
         sbx = Sandbox(url, h.run_dir)
         emit = self.emit_of(h.run_id)
         res = h.result
-        res.llm_mode = "litellm" if llm.available else "heuristic (key-free)"
+        res.llm_mode = llm.mode_label
         stage_started = time.monotonic()
 
         def stage(n: int, name: str):
@@ -186,7 +186,7 @@ class Orchestrator:
             # ------------------------------- STAGE 3b: exploration
             stage(3, "Explorer — mapping the territory")
             t0 = time.time()
-            explorer = Explorer(sbx, h.run_dir, emit)
+            explorer = Explorer(sbx, h.run_dir, emit, llm=llm)
             appmap = explorer.explore(desc)
             res.states_found = len(appmap.states)
             self._save(h)
